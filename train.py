@@ -3,8 +3,8 @@ from os.path import abspath, dirname, join
 
 import click
 import yaml
-from agri_semantics.datasets import get_data_module
-from agri_semantics.models import get_model
+from datasets import get_data_module
+from models import get_model
 from pytorch_lightning import Trainer
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
@@ -53,12 +53,18 @@ def monitoring_mode(task) -> str:
     default=None,
 )
 @click.option(
-    "--checkpoint", "-ckpt", type=str, help="path to checkpoint file (.ckpt) to resume training.", default=None
+    "--checkpoint",
+    "-ckpt",
+    type=str,
+    help="path to checkpoint file (.ckpt) to resume training.",
+    default=None,
 )
 def main(config, weights, checkpoint):
     with open(config, "r") as config_file:
         cfg = yaml.safe_load(config_file)
-    cfg["git_commit_version"] = str(subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).strip())
+    cfg["git_commit_version"] = str(
+        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).strip()
+    )
 
     # Load data and model
     data = get_data_module(cfg)
@@ -77,7 +83,9 @@ def main(config, weights, checkpoint):
         save_last=True,
     )
 
-    tb_logger = pl_loggers.TensorBoardLogger(f"experiments/{cfg['experiment']['id']}", default_hp_metric=False)
+    tb_logger = pl_loggers.TensorBoardLogger(
+        f"experiments/{cfg['experiment']['id']}", default_hp_metric=False
+    )
 
     # Setup trainer
     trainer = Trainer(
