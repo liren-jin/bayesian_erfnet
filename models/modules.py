@@ -2,7 +2,7 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-from agri_semantics.models import blocks
+from models import blocks
 
 
 ##############################################################################################
@@ -30,15 +30,23 @@ class AleatoricERFNetModel(nn.Module):
         self.num_classes = num_classes
         self.use_shared_decoder = use_shared_decoder
 
-        self.encoder = DropoutERFNetEncoder(in_channels, dropout_prob, epistemic_version)
+        self.encoder = DropoutERFNetEncoder(
+            in_channels, dropout_prob, epistemic_version
+        )
         if deep_encoder:
             self.encoder = DropoutERFNetDeepEncoder(in_channels, dropout_prob)
 
         self.segmentation_decoder = DropoutERFNetDecoder(self.num_classes)
-        self.aleatoric_uncertainty_decoder = ERFNetAleatoricUncertaintyDecoder(self.num_classes)
-        self.shared_decoder = ERFNetAleatoricSharedDecoder(self.num_classes, dropout_prob, epistemic_version)
+        self.aleatoric_uncertainty_decoder = ERFNetAleatoricUncertaintyDecoder(
+            self.num_classes
+        )
+        self.shared_decoder = ERFNetAleatoricSharedDecoder(
+            self.num_classes, dropout_prob, epistemic_version
+        )
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         output_enc = self.encoder(x)
 
         if self.use_shared_decoder:
@@ -54,7 +62,12 @@ class AleatoricERFNetModel(nn.Module):
 
 
 class DropoutERFNetEncoder(nn.Module):
-    def __init__(self, in_channels: int, dropout_prob: float = 0.3, epistemic_version: str = "standard"):
+    def __init__(
+        self,
+        in_channels: int,
+        dropout_prob: float = 0.3,
+        epistemic_version: str = "standard",
+    ):
         super().__init__()
         self.initial_block = blocks.DownsamplerBlock(in_channels, 16)
 
@@ -62,7 +75,9 @@ class DropoutERFNetEncoder(nn.Module):
 
         self.layers.append(blocks.DownsamplerBlock(16, 64))
 
-        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(dropout_prob, epistemic_version)
+        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(
+            dropout_prob, epistemic_version
+        )
 
         for x in range(0, 5):  # 5 times
             self.layers.append(blocks.non_bottleneck_1d(64, dropout_prob_1, 1))
@@ -77,7 +92,9 @@ class DropoutERFNetEncoder(nn.Module):
             self.layers.append(blocks.non_bottleneck_1d(128, dropout_prob_tmp, 16))
 
     @staticmethod
-    def get_dropout_probs(dropout_prob: float, epistemic_version: str) -> Tuple[float, float, float]:
+    def get_dropout_probs(
+        dropout_prob: float, epistemic_version: str
+    ) -> Tuple[float, float, float]:
         if epistemic_version == "all":
             return dropout_prob, dropout_prob, dropout_prob
         elif epistemic_version == "center":
@@ -141,7 +158,9 @@ class DropoutERFNetDecoder(nn.Module):
         self.layers.append(blocks.non_bottleneck_1d(16, 0, 1))
         self.layers.append(blocks.non_bottleneck_1d(16, 0, 1))
 
-        self.output_conv = nn.ConvTranspose2d(16, num_classes, 2, stride=2, padding=0, output_padding=0, bias=True)
+        self.output_conv = nn.ConvTranspose2d(
+            16, num_classes, 2, stride=2, padding=0, output_padding=0, bias=True
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         output = x
@@ -155,13 +174,20 @@ class DropoutERFNetDecoder(nn.Module):
 
 
 class ERFNetAleatoricSharedDecoder(nn.Module):
-    def __init__(self, num_classes: int, dropout_prob: float = 0.0, epistemic_version: str = "standard"):
+    def __init__(
+        self,
+        num_classes: int,
+        dropout_prob: float = 0.0,
+        epistemic_version: str = "standard",
+    ):
         super().__init__()
 
         self.num_classes = num_classes
         self.layers = nn.ModuleList()
 
-        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(dropout_prob, epistemic_version)
+        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(
+            dropout_prob, epistemic_version
+        )
 
         self.layers.append(blocks.UpsamplerBlock(128, 64))
         self.layers.append(blocks.non_bottleneck_1d(64, dropout_prob_1, 1))
@@ -171,11 +197,15 @@ class ERFNetAleatoricSharedDecoder(nn.Module):
         self.layers.append(blocks.non_bottleneck_1d(16, dropout_prob_2, 1))
         self.layers.append(blocks.non_bottleneck_1d(16, dropout_prob_3, 1))
 
-        self.output_conv = nn.ConvTranspose2d(16, num_classes + 1, 2, stride=2, padding=0, output_padding=0, bias=True)
+        self.output_conv = nn.ConvTranspose2d(
+            16, num_classes + 1, 2, stride=2, padding=0, output_padding=0, bias=True
+        )
         self.output_std_fn = nn.Softplus(beta=1)
 
     @staticmethod
-    def get_dropout_probs(dropout_prob: float, epistemic_version: str) -> Tuple[float, float, float]:
+    def get_dropout_probs(
+        dropout_prob: float, epistemic_version: str
+    ) -> Tuple[float, float, float]:
         if epistemic_version == "all":
             return dropout_prob, dropout_prob, dropout_prob
         elif epistemic_version == "center":
@@ -214,7 +244,9 @@ class ERFNetAleatoricUncertaintyDecoder(nn.Module):
         self.layers.append(blocks.non_bottleneck_1d(16, 0, 1))
         self.layers.append(blocks.non_bottleneck_1d(16, 0, 1))
 
-        self.output_conv = nn.ConvTranspose2d(16, 1, 2, stride=2, padding=0, output_padding=0, bias=True)
+        self.output_conv = nn.ConvTranspose2d(
+            16, 1, 2, stride=2, padding=0, output_padding=0, bias=True
+        )
         self.output_std_fn = nn.Softplus(beta=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -258,7 +290,12 @@ class ERFNetModel(nn.Module):
 
 
 class ERFNetEncoder(nn.Module):
-    def __init__(self, in_channels: int, dropout_prob: float = 0.3, epistemic_version: str = "standard"):
+    def __init__(
+        self,
+        in_channels: int,
+        dropout_prob: float = 0.3,
+        epistemic_version: str = "standard",
+    ):
         super().__init__()
         self.initial_block = blocks.DownsamplerBlock(in_channels, 16)
 
@@ -266,7 +303,9 @@ class ERFNetEncoder(nn.Module):
 
         self.layers.append(blocks.DownsamplerBlock(16, 64))
 
-        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(dropout_prob, epistemic_version)
+        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(
+            dropout_prob, epistemic_version
+        )
 
         for x in range(0, 5):  # 5 times
             self.layers.append(blocks.non_bottleneck_1d(64, dropout_prob_1, 1))
@@ -281,7 +320,9 @@ class ERFNetEncoder(nn.Module):
             self.layers.append(blocks.non_bottleneck_1d(128, dropout_prob_tmp, 16))
 
     @staticmethod
-    def get_dropout_probs(dropout_prob: float, epistemic_version: str) -> Tuple[float, float, float]:
+    def get_dropout_probs(
+        dropout_prob: float, epistemic_version: str
+    ) -> Tuple[float, float, float]:
         if epistemic_version == "all":
             return dropout_prob, dropout_prob, dropout_prob
         elif epistemic_version == "center":
@@ -332,12 +373,19 @@ class ERFNetDeepEncoder(nn.Module):
 
 
 class ERFNetDecoder(nn.Module):
-    def __init__(self, num_classes: int, dropout_prob: float = 0.0, epistemic_version: str = "standard"):
+    def __init__(
+        self,
+        num_classes: int,
+        dropout_prob: float = 0.0,
+        epistemic_version: str = "standard",
+    ):
         super().__init__()
 
         self.layers = nn.ModuleList()
 
-        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(dropout_prob, epistemic_version)
+        dropout_prob_1, dropout_prob_2, dropout_prob_3 = self.get_dropout_probs(
+            dropout_prob, epistemic_version
+        )
 
         self.layers.append(blocks.UpsamplerBlock(128, 64))
         self.layers.append(blocks.non_bottleneck_1d(64, dropout_prob_1, 1))
@@ -347,10 +395,14 @@ class ERFNetDecoder(nn.Module):
         self.layers.append(blocks.non_bottleneck_1d(16, dropout_prob_2, 1))
         self.layers.append(blocks.non_bottleneck_1d(16, dropout_prob_3, 1))
 
-        self.output_conv = nn.ConvTranspose2d(16, num_classes, 2, stride=2, padding=0, output_padding=0, bias=True)
+        self.output_conv = nn.ConvTranspose2d(
+            16, num_classes, 2, stride=2, padding=0, output_padding=0, bias=True
+        )
 
     @staticmethod
-    def get_dropout_probs(dropout_prob: float, epistemic_version: str) -> Tuple[float, float, float]:
+    def get_dropout_probs(
+        dropout_prob: float, epistemic_version: str
+    ) -> Tuple[float, float, float]:
         if epistemic_version == "all":
             return dropout_prob, dropout_prob, dropout_prob
         elif epistemic_version == "center":

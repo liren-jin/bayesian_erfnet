@@ -4,8 +4,8 @@ from pytorch_lightning import Trainer
 from pytorch_lightning import loggers as pl_loggers
 import yaml
 
-from agri_semantics.datasets import get_data_module
-from agri_semantics.models import get_model
+from datasets import get_data_module
+from models import get_model
 
 
 @click.command()
@@ -17,7 +17,13 @@ from agri_semantics.models import get_model
     help="path to the config file (.yaml)",
     default=join(dirname(abspath(__file__)), "config", "config.yaml"),
 )
-@click.option("--checkpoint", "-ckpt", type=str, help="path to checkpoint file (.ckpt)", required=True)
+@click.option(
+    "--checkpoint",
+    "-ckpt",
+    type=str,
+    help="path to checkpoint file (.ckpt)",
+    required=True,
+)
 def main(config, checkpoint):
     with open(config, "r") as config_file:
         cfg = yaml.safe_load(config_file)
@@ -28,7 +34,9 @@ def main(config, checkpoint):
     model = get_model(cfg)
     model = model.load_from_checkpoint(checkpoint, cfg=cfg)
 
-    tb_logger = pl_loggers.TensorBoardLogger("experiments/" + cfg["experiment"]["id"], default_hp_metric=False)
+    tb_logger = pl_loggers.TensorBoardLogger(
+        "experiments/" + cfg["experiment"]["id"], default_hp_metric=False
+    )
 
     # Setup trainer
     trainer = Trainer(logger=tb_logger, gpus=cfg["train"]["n_gpus"])

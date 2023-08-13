@@ -1,31 +1,11 @@
 from typing import Dict, Tuple
-
 import numpy as np
 import torch
-from agri_semantics.utils import resize
 from pytorch_lightning.core.lightning import LightningModule
 from torch import nn
 from torchvision import transforms
 
 LABELS = {
-    "scw": {
-        "soil": {"color": (0, 0, 0), "id": 0},
-        "crop": {"color": (0, 255, 0), "id": 1},
-        "weed": {"color": (255, 0, 0), "id": 2},
-    },
-    "dlpLabels": {
-        "soil": {"color": (0, 0, 0), "id": 0},
-        "crop": {"color": (0, 255, 0), "id": 1},
-        "weed": {"color": (255, 0, 0), "id": 2},
-        "dicot": {"color": (0, 25, 127), "id": 3},
-        "grass": {"color": (64, 127, 0), "id": 4},
-        "vegetation": {"color": (0, 0, 255), "id": 5},
-    },
-    "stemLabels": {
-        "soil": {"color": (0, 0, 0), "id": 0},
-        "crop": {"color": (0, 255, 0), "id": 2},
-        "dicot": {"color": (0, 0, 255), "id": 1},
-    },
     "cityscapes": {
         "road": {"color": (128, 64, 128), "id": 0},
         "sidewalk": {"color": (244, 35, 232), "id": 1},
@@ -48,27 +28,6 @@ LABELS = {
         "bicycle": {"color": (119, 11, 32), "id": 18},
         "void": {"color": (0, 0, 0), "id": 19},
     },
-    "rit18": {
-        "bg": {"color": (0, 0, 0), "id": 0},
-        "road marking": {"color": (19, 9, 25), "id": 1},
-        "tree": {"color": (26, 24, 52), "id": 2},
-        "building": {"color": (24, 45, 72), "id": 3},
-        "vehicle": {"color": (21, 69, 78), "id": 4},
-        "person": {"color": (25, 94, 70), "id": 5},
-        "lifeguard chair": {"color": (43, 111, 57), "id": 6},
-        "picnic table": {"color": (75, 120, 47), "id": 7},
-        "black wood panel": {"color": (114, 122, 49), "id": 8},
-        "white wood panel": {"color": (161, 121, 74), "id": 9},
-        "landing pad": {"color": (193, 121, 111), "id": 10},
-        "buoy": {"color": (209, 128, 156), "id": 11},
-        "rocks": {"color": (211, 143, 197), "id": 12},
-        "vegetation": {"color": (203, 165, 227), "id": 13},
-        "grass": {"color": (194, 193, 242), "id": 14},
-        "sand": {"color": (194, 216, 242), "id": 15},
-        "lake": {"color": (206, 235, 239), "id": 16},
-        "pond": {"color": (229, 247, 240), "id": 17},
-        "asphalt": {"color": (255, 255, 255), "id": 18},
-    },
     "potsdam": {
         "boundary line": {"color": (0, 0, 0), "id": 0},
         "imprevious surfaces": {"color": (255, 255, 255), "id": 1},
@@ -90,14 +49,22 @@ LABELS = {
         "misc": {"color": (36, 9, 129), "id": 8},
         "boundary": {"color": (255, 255, 255), "id": 9},
     },
+    "shapenet": {
+        "background": {"color": (255, 255, 255), "id": 0},
+        "car": {"color": (255, 0, 255), "id": 1},
+        "chair": {"color": (0, 0, 255), "id": 2},
+        "table": {"color": (0, 255, 255), "id": 3},
+        "sofa": {"color": (255, 0, 0), "id": 4},
+        "airplane": {"color": (102, 0, 204), "id": 5},
+        "bottle": {"color": (0, 255, 0), "id": 6},
+    },
 }
 
 THEMES = {
     "cityscapes": "cityscapes",
-    "weedmap": "scw",
-    "rit18": "rit18",
     "potsdam": "potsdam",
     "flightmare": "flightmare",
+    "shapenet": "shapenet",
 }
 
 
@@ -147,10 +114,15 @@ def enable_dropout(model: nn.Module):
 
 
 def sample_from_aleatoric_model(
-    model: LightningModule, batch: Dict, num_mc_aleatoric: int = 50, device: torch.device = None
+    model: LightningModule,
+    batch: Dict,
+    num_mc_aleatoric: int = 50,
+    device: torch.device = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     est_seg, est_std, hidden_representation = model.forward(batch["data"])
-    sampled_predictions = torch.zeros((num_mc_aleatoric, *est_seg.size()), device=device)
+    sampled_predictions = torch.zeros(
+        (num_mc_aleatoric, *est_seg.size()), device=device
+    )
     for j in range(num_mc_aleatoric):
         noise_mean = torch.zeros(est_seg.size(), device=device)
         noise_std = torch.ones(est_seg.size(), device=device)
@@ -169,14 +141,22 @@ def compute_prediction_stats(
     if variance_predictions.shape[1] == 1:
         variance_predictions = variance_predictions.squeeze(axis=1)
 
-    entropy_predictions = -np.sum(mean_predictions * np.log(mean_predictions + 10 ** (-8)), axis=1)
+    entropy_predictions = -np.sum(
+        mean_predictions * np.log(mean_predictions + 10 ** (-8)), axis=1
+    )
     mutual_info_predictions = entropy_predictions - np.mean(
         np.sum(-predictions * np.log(predictions + 10 ** (-8)), axis=2), axis=0
     )
 
     hidden_representations = np.mean(hidden_representations, axis=0)
 
-    return mean_predictions, variance_predictions, entropy_predictions, mutual_info_predictions, hidden_representations
+    return (
+        mean_predictions,
+        variance_predictions,
+        entropy_predictions,
+        mutual_info_predictions,
+        hidden_representations,
+    )
 
 
 def get_predictions(
@@ -213,7 +193,10 @@ def get_predictions(
         with torch.no_grad():
             if aleatoric_model:
                 est_anno, hidden_representation = sample_from_aleatoric_model(
-                    single_model, batch, num_mc_aleatoric=num_mc_aleatoric, device=device
+                    single_model,
+                    batch,
+                    num_mc_aleatoric=num_mc_aleatoric,
+                    device=device,
                 )
             else:
                 est_anno, hidden_representation = single_model.forward(batch["data"])
@@ -224,7 +207,9 @@ def get_predictions(
             elif task == "regression":
                 predictions.append(est_anno.cpu().numpy())
             else:
-                raise NotImplementedError(f"{task} output non-linearity not implemented!")
+                raise NotImplementedError(
+                    f"{task} output non-linearity not implemented!"
+                )
 
             hidden_representations.append(hidden_representation.cpu().numpy())
 
@@ -234,14 +219,22 @@ def get_predictions(
         entropy_predictions,
         mutual_info_predictions,
         hidden_representations,
-    ) = compute_prediction_stats(np.array(predictions), np.array(hidden_representations))
+    ) = compute_prediction_stats(
+        np.array(predictions), np.array(hidden_representations)
+    )
 
     if task == "regression":
         uncertainty_predictions = variance_predictions
     elif task == "classification":
-        uncertainty_predictions = mutual_info_predictions if use_mc_dropout or ensemble_model else entropy_predictions
+        uncertainty_predictions = (
+            mutual_info_predictions
+            if use_mc_dropout or ensemble_model
+            else entropy_predictions
+        )
     else:
-        raise NotImplementedError(f"Uncertainty measure for {task} task not implemented!")
+        raise NotImplementedError(
+            f"Uncertainty measure for {task} task not implemented!"
+        )
 
     return mean_predictions, uncertainty_predictions, hidden_representations
 
@@ -261,7 +254,13 @@ def infer_anno_and_epistemic_uncertainty_from_image(
     image_tensor = to_normalized_tensor(image)
 
     if resize_image:
-        image_tensor = resize(image_tensor, width=344, height=None, interpolation=1, keep_aspect_ratio=True)
+        image_tensor = resize(
+            image_tensor,
+            width=344,
+            height=None,
+            interpolation=1,
+            keep_aspect_ratio=True,
+        )
 
     image_batch = {"data": image_tensor.float().unsqueeze(0).to(device)}
     mean_predictions, uncertainty_predictions, hidden_representations = get_predictions(

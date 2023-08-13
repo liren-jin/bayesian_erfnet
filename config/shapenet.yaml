@@ -1,14 +1,13 @@
 experiment:
-    id: 'test_representation_mapping'
+    id: 'shapenet_training'
 
 ##Data
 data:
-    name: 'vaihingen'
-    # path_to_dataset: 'agri_semantics/datasets/vaihingen/'
-    path_to_dataset: 'bayesian_erfnet/agri_semantics/datasets/vaihingen/'
+    name: 'shapenet'
+    path_to_dataset: '/datasets/shapenet'
     img_prop:
-        width: 400
-        height:
+        width: 480
+        height: 360
         keep_aspect_ratio: true
     depth: 3
     batch_size: 8
@@ -17,13 +16,13 @@ data:
 
 ##Training
 train:
-    n_gpus: 0
+    n_gpus: 1
     num_workers: 4
-    max_epoch: 1
+    max_epoch: 500
     lr: 0.0001
     weight_decay: 0.001
     num_mc_aleatoric: 50
-    num_mc_epistemic: 2
+    num_mc_epistemic: 50
     patience: 500
 
     transformations:
@@ -34,11 +33,11 @@ train:
         # random_crop:
         #   height:
         #   width: 200
-        resize:
-          height:
-          width: 344
-          keep_aspect_ratio: true
-        #color_jitter:
+        # resize:
+        #   height:
+        #   width: 344
+        #   keep_aspect_ratio: true
+        # color_jitter:
         #  brightness: 0.0 # 0.0-1.0
         #  contrast: 0.0 # 0.0-1.0
         #  saturation: 0.8 # 0.0-1.0
@@ -46,21 +45,22 @@ train:
 
 val:
     transformations:
-        resize:
-          height:
-          width: 344
-          keep_aspect_ratio: true
+        # resize:
+        #   height:
+        #   width: 344
+        #   keep_aspect_ratio: true
 
 test:
     transformations:
-        resize:
-          height:
-          width: 344
-          keep_aspect_ratio: true
+        # resize:
+        #   height:
+        #   width: 344
+        #   keep_aspect_ratio: true
 
 ##Network
 model:
     name: 'erfnet'
+    task: 'classification' # regression, classification
     aleatoric_model: false
     ensemble_model: false
     num_models: 1
@@ -69,7 +69,7 @@ model:
     shared_decoder: true
     num_classes: 7
     num_classes_pretrained: 20
-    loss: 'xentropy'
+    loss: 'xentropy' # xentropy, mse
     in_channels: 3
     dropout_prob: 0.5
     # class_frequencies:
@@ -80,8 +80,4 @@ model:
     #   - 0.1768
     #   - 0.0442
 
-##Active Learning
-active_learning:
-    type: 'all'
-    num_collected_images: 50
-    max_collected_images: 500
+

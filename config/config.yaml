@@ -40,8 +40,3 @@ model:
     in_channels: 3
     dropout_prob: 0.2
 
-##Active Learning
-# active_learning:
-#     type: 'all'
-#     num_collected_images: 100
-#     max_collected_images: 1000

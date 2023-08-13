@@ -5,8 +5,8 @@ import cv2
 import numpy as np
 import torch
 from PIL import Image
-from agri_semantics.transformations import get_transformations, Transformation
-from agri_semantics.utils.utils import LABELS
+from transformations import get_transformations, Transformation
+from utils.utils import LABELS
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
@@ -18,33 +18,38 @@ class FlightmareDataModule(LightningDataModule):
 
         self.cfg = cfg
         self.task = cfg["model"]["task"]
-        self.active_learning = False  # "active_learning" in self.cfg
-        self.max_collected_images = cfg["active_learning"]["max_collected_images"] if self.active_learning else -1
         self.data_indices = np.array([0])
         self.all_indices = None
 
     def setup(self, stage: str = None):
-        path_to_training_dataset = os.path.join(self.cfg["data"]["path_to_dataset"], "training_set")
-        path_to_validation_dataset = os.path.join(self.cfg["data"]["path_to_dataset"], "validation_set")
-        path_to_test_dataset = os.path.join(self.cfg["data"]["path_to_dataset"], "test_set")
+        path_to_training_dataset = os.path.join(
+            self.cfg["data"]["path_to_dataset"], "training_set"
+        )
+        path_to_validation_dataset = os.path.join(
+            self.cfg["data"]["path_to_dataset"], "validation_set"
+        )
+        path_to_test_dataset = os.path.join(
+            self.cfg["data"]["path_to_dataset"], "test_set"
+        )
 
         # Assign datasets for use in dataloaders
         if stage == "fit" or stage is None:
             self._train = FlightmareDataset(
-                path_to_training_dataset, self.cfg, transformations=get_transformations(self.cfg, "train")
+                path_to_training_dataset,
+                self.cfg,
+                transformations=get_transformations(self.cfg, "train"),
             )
             self._val = FlightmareDataset(
-                path_to_validation_dataset, self.cfg, transformations=get_transformations(self.cfg, "val")
+                path_to_validation_dataset,
+                self.cfg,
+                transformations=get_transformations(self.cfg, "val"),
             )
-
-            if self.active_learning and self.all_indices is None:
-                train_indices = np.arange(len(self._train))
-                max_num_indices = min(len(self._train), self.max_collected_images)
-                self.all_indices = np.sort(np.random.choice(train_indices, size=max_num_indices, replace=False))
 
         if stage == "test" or stage is None:
             self._test = FlightmareDataset(
-                path_to_test_dataset, self.cfg, transformations=get_transformations(self.cfg, "test")
+                path_to_test_dataset,
+                self.cfg,
+                transformations=get_transformations(self.cfg, "test"),
             )
 
     def append_data_indices(self, indices: np.array):
@@ -65,7 +70,9 @@ class FlightmareDataModule(LightningDataModule):
         train_dataset = self._train
         unlabeled_data = Subset(train_dataset, self.get_unlabeled_data_indices())
 
-        loader = DataLoader(unlabeled_data, batch_size=batch_size, shuffle=False, num_workers=n_workers)
+        loader = DataLoader(
+            unlabeled_data, batch_size=batch_size, shuffle=False, num_workers=n_workers
+        )
 
         return loader
 
@@ -75,10 +82,10 @@ class FlightmareDataModule(LightningDataModule):
         n_workers = self.cfg["data"]["num_workers"]
 
         train_dataset = self._train
-        if self.active_learning:
-            train_dataset = Subset(train_dataset, self.data_indices)
 
-        loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=n_workers)
+        loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=n_workers
+        )
 
         return loader
 
@@ -86,7 +93,9 @@ class FlightmareDataModule(LightningDataModule):
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
 
-        loader = DataLoader(self._val, batch_size=batch_size, num_workers=n_workers, shuffle=False)
+        loader = DataLoader(
+            self._val, batch_size=batch_size, num_workers=n_workers, shuffle=False
+        )
 
         return loader
 
@@ -94,7 +103,9 @@ class FlightmareDataModule(LightningDataModule):
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
 
-        loader = DataLoader(self._test, batch_size=batch_size, num_workers=n_workers, shuffle=False)
+        loader = DataLoader(
+            self._test, batch_size=batch_size, num_workers=n_workers, shuffle=False
+        )
 
         return loader
 
@@ -104,7 +115,9 @@ def is_image(filename):
 
 
 class FlightmareDataset(Dataset):
-    def __init__(self, path_to_dataset: str, cfg: Dict, transformations: List[Transformation]):
+    def __init__(
+        self, path_to_dataset: str, cfg: Dict, transformations: List[Transformation]
+    ):
         super().__init__()
 
         self.task = cfg["model"]["task"]
@@ -166,12 +179,18 @@ class FlightmareDataset(Dataset):
             anno = np.moveaxis(anno, -1, 0)  # now in CHW mode
             return torch.from_numpy(anno).long()
         elif self.task == "regression":
-            anno = cv2.imread(path_to_current_anno, cv2.IMREAD_GRAYSCALE)  # 0 to 255 value range
-            anno = anno.astype(np.float32)  # torch does not support conversion of uint16, now in HW mode
+            anno = cv2.imread(
+                path_to_current_anno, cv2.IMREAD_GRAYSCALE
+            )  # 0 to 255 value range
+            anno = anno.astype(
+                np.float32
+            )  # torch does not support conversion of uint16, now in HW mode
             anno = (self.cfg["model"]["value_range"]["max_value"] / 255) * anno
             return torch.from_numpy(anno).float().unsqueeze(dim=0)
         else:
-            raise NotImplementedError(f"{self.task} task is not implemented for Flightmare dataset!")
+            raise NotImplementedError(
+                f"{self.task} task is not implemented for Flightmare dataset!"
+            )
 
     @staticmethod
     def remap_annotation(anno: np.array) -> torch.Tensor:
@@ -196,7 +215,9 @@ class FlightmareDataset(Dataset):
         assert dims[0] == 3, "annotation must have 3 channels!!!"
 
         flightmare_labels = LABELS["flightmare"]
-        remapped_anno = np.ones((dims[1], dims[2])) * flightmare_labels["boundary"]["id"]
+        remapped_anno = (
+            np.ones((dims[1], dims[2])) * flightmare_labels["boundary"]["id"]
+        )
 
         for label_key, label_info in flightmare_labels.items():
             if label_key == "boundary":

@@ -10,16 +10,17 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 
-from agri_semantics.utils import resize
+from utils import resize
 
 
 class CityscapesDataModule(LightningDataModule):
-    def __init__(self, cfg: Dict, active_learning: bool = False):
+    def __init__(
+        self,
+        cfg: Dict,
+    ):
         super().__init__()
 
         self.cfg = cfg
-        self.active_learning = False  # "active_learning" in self.cfg
-        self.max_collected_images = cfg["active_learning"]["max_collected_images"] if self.active_learning else -1
         self.data_indices = np.array([0])
         self.all_indices = None
 
@@ -36,7 +37,9 @@ class CityscapesDataModule(LightningDataModule):
                                    Defaults to None.
         """
 
-        path_to_split_info = os.path.join(self.cfg["data"]["path_to_dataset"], "split.yaml")
+        path_to_split_info = os.path.join(
+            self.cfg["data"]["path_to_dataset"], "split.yaml"
+        )
         with open(path_to_split_info) as istream:
             split_info = yaml.safe_load(istream)
 
@@ -53,21 +56,28 @@ class CityscapesDataModule(LightningDataModule):
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
             self._cityscapes_train = CityscapesDataset(
-                path_to_dataset, train_filenames, img_width=img_width, img_height=img_height, keep_aspect_ratio=keep_ap
+                path_to_dataset,
+                train_filenames,
+                img_width=img_width,
+                img_height=img_height,
+                keep_aspect_ratio=keep_ap,
             )
             self._cityscapes_val = CityscapesDataset(
-                path_to_dataset, val_filenames, img_width=img_width, img_height=img_height, keep_aspect_ratio=keep_ap
+                path_to_dataset,
+                val_filenames,
+                img_width=img_width,
+                img_height=img_height,
+                keep_aspect_ratio=keep_ap,
             )
-
-            if self.active_learning and self.all_indices is None:
-                train_indices = np.arange(len(self._cityscapes_train))
-                max_num_indices = min(len(self._cityscapes_train), self.max_collected_images)
-                self.all_indices = np.sort(np.random.choice(train_indices, size=max_num_indices, replace=False))
 
         # Assign test dataset for use in dataloader(s)
         if stage == "test" or stage is None:
             self._cityscapes_test = CityscapesDataset(
-                path_to_dataset, test_filenames, img_width=img_width, img_height=img_height, keep_aspect_ratio=keep_ap
+                path_to_dataset,
+                test_filenames,
+                img_width=img_width,
+                img_height=img_height,
+                keep_aspect_ratio=keep_ap,
             )
 
     def set_indices(self, indices: np.array):
@@ -90,7 +100,9 @@ class CityscapesDataModule(LightningDataModule):
         train_dataset = self._cityscapes_train
         unlabeled_data = Subset(train_dataset, self.get_unlabeled_data_indices())
 
-        loader = DataLoader(unlabeled_data, batch_size=batch_size, shuffle=False, num_workers=n_workers)
+        loader = DataLoader(
+            unlabeled_data, batch_size=batch_size, shuffle=False, num_workers=n_workers
+        )
 
         return loader
 
@@ -100,10 +112,10 @@ class CityscapesDataModule(LightningDataModule):
         n_workers = self.cfg["data"]["num_workers"]
 
         train_dataset = self._cityscapes_train
-        if self.active_learning:
-            train_dataset = Subset(train_dataset, self.data_indices)
 
-        loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=n_workers)
+        loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=shuffle, num_workers=n_workers
+        )
 
         return loader
 
@@ -111,7 +123,12 @@ class CityscapesDataModule(LightningDataModule):
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
 
-        loader = DataLoader(self._cityscapes_val, batch_size=batch_size, num_workers=n_workers, shuffle=False)
+        loader = DataLoader(
+            self._cityscapes_val,
+            batch_size=batch_size,
+            num_workers=n_workers,
+            shuffle=False,
+        )
 
         return loader
 
@@ -119,7 +136,12 @@ class CityscapesDataModule(LightningDataModule):
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
 
-        loader = DataLoader(self._cityscapes_test, batch_size=batch_size, num_workers=n_workers, shuffle=False)
+        loader = DataLoader(
+            self._cityscapes_test,
+            batch_size=batch_size,
+            num_workers=n_workers,
+            shuffle=False,
+        )
 
         return loader
 
@@ -141,7 +163,7 @@ class CityscapesDataset(Dataset):
 
     The directory structure is as following:
     ├── annotations
-    │   └── gt-labels
+      └── gt-labels
     └── images
         └── rgb
     └── split.yaml
@@ -167,7 +189,9 @@ class CityscapesDataset(Dataset):
         if not os.path.exists(path_to_dataset):
             raise FileNotFoundError
 
-        assert filenames is not None and len(filenames) > 0, "Cannot create an empty dataset"
+        assert (
+            filenames is not None and len(filenames) > 0
+        ), "Cannot create an empty dataset"
 
         super().__init__()
 
@@ -195,7 +219,9 @@ class CityscapesDataset(Dataset):
                     self.anno_files.append(fname)
         self.anno_files.sort()
 
-        assert len(self.image_files) == len(self.anno_files), "Number of images and annos does not match."
+        assert len(self.image_files) == len(
+            self.anno_files
+        ), "Number of images and annos does not match."
 
         # specify image transformations
         self.img_to_tensor = transforms.ToTensor()
@@ -218,7 +244,11 @@ class CityscapesDataset(Dataset):
         img = Image.open(path_to_current_img)  # PIL.PngImagePlugin.PngImageFile
         img = self.img_to_tensor(img)
         img = resize(
-            img, width=self.img_width, height=self.img_height, interpolation=1, keep_aspect_ratio=self.keep_aspect_ratio
+            img,
+            width=self.img_width,
+            height=self.img_height,
+            interpolation=1,
+            keep_aspect_ratio=self.keep_aspect_ratio,
         )
 
         path_to_current_anno = os.path.join(self.path_to_annos, self.anno_files[idx])

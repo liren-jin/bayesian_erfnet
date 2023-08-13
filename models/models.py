@@ -12,14 +12,13 @@ import seaborn as sns
 import torch
 import torch.nn as nn
 import torchmetrics
-import torchvision
 from pytorch_lightning.core.lightning import LightningModule
 
-import agri_semantics.utils.utils as utils
-from agri_semantics.constants import Losses
-from agri_semantics.models.loss import CrossEntropyLoss
-from agri_semantics.utils import metrics
-from agri_semantics.models import modules
+import utils.utils as utils
+from constants import Losses
+from models.loss import CrossEntropyLoss
+from utils import metrics
+from models import modules
 
 
 ##############################################################################################
@@ -29,11 +28,24 @@ from agri_semantics.models import modules
 #                                                                                            #
 ##############################################################################################
 
-IGNORE_INDEX = {"cityscapes": 19, "weedmap": -100, "rit18": 0, "rit18_merged": 0, "potsdam": 0, "flightmare": 9}
+IGNORE_INDEX = {
+    "cityscapes": 19,
+    "weedmap": -100,
+    "rit18": 0,
+    "rit18_merged": 0,
+    "potsdam": 0,
+    "flightmare": 9,
+}
 
 
 class NetworkWrapper(LightningModule):
-    def __init__(self, cfg: Dict, al_logger_name: str = "", al_iteration: int = 0, num_train_data: int = 1):
+    def __init__(
+        self,
+        cfg: Dict,
+        al_logger_name: str = "",
+        al_iteration: int = 0,
+        num_train_data: int = 1,
+    ):
         super().__init__()
 
         self.cfg = cfg
@@ -90,7 +102,9 @@ class NetworkWrapper(LightningModule):
         elif self.task == "regression":
             return self.regression_output_fn
         else:
-            raise NotImplementedError(f"{self.task} output non-linearity not implemented!")
+            raise NotImplementedError(
+                f"{self.task} output non-linearity not implemented!"
+            )
 
     @property
     def loss_fn(self) -> callable:
@@ -117,16 +131,24 @@ class NetworkWrapper(LightningModule):
     def validation_epoch_end(self, outputs):
         conf_matrices = [tmp["conf_matrix"] for tmp in outputs]
         losses = [tmp["loss"] for tmp in outputs]
-        self.track_evaluation_metrics(conf_matrices, losses, stage="Validation", calibration_info_list=None)
+        self.track_evaluation_metrics(
+            conf_matrices, losses, stage="Validation", calibration_info_list=None
+        )
         if self.task == "classification":
             self.track_confusion_matrix(conf_matrices, stage="Validation")
 
     def test_step(self, batch: dict, batch_idx: int):
         pass
 
-    def common_test_step(self, batch: dict, batch_idx: int, aleatoric_dist: Tuple = None):
+    def common_test_step(
+        self, batch: dict, batch_idx: int, aleatoric_dist: Tuple = None
+    ):
         targets = batch["anno"].to(self.device)
-        mean_predictions, uncertainty_predictions, hidden_representations = utils.get_predictions(
+        (
+            mean_predictions,
+            uncertainty_predictions,
+            hidden_representations,
+        ) = utils.get_predictions(
             self,
             batch,
             num_mc_dropout=self.num_mc_epistemic,
@@ -136,9 +158,9 @@ class NetworkWrapper(LightningModule):
             device=self.device,
             task=self.task,
         )
-        mean_predictions, uncertainty_predictions = torch.from_numpy(mean_predictions).to(
-            self.device
-        ), torch.from_numpy(uncertainty_predictions).to(self.device)
+        mean_predictions, uncertainty_predictions = torch.from_numpy(
+            mean_predictions
+        ).to(self.device), torch.from_numpy(uncertainty_predictions).to(self.device)
 
         if self.task == "classification":
             _, hard_preds = torch.max(mean_predictions, dim=1)
@@ -155,9 +177,13 @@ class NetworkWrapper(LightningModule):
             confusion_matrix = torchmetrics.functional.confusion_matrix(
                 hard_preds, targets, num_classes=self.num_classes, normalize=None
             )
-            calibration_info = metrics.compute_calibration_info(mean_predictions, targets, num_bins=20)
-            per_class_epistemic_uncertainty = self.compute_per_class_epistemic_uncertainty(
-                hard_preds, uncertainty_predictions
+            calibration_info = metrics.compute_calibration_info(
+                mean_predictions, targets, num_bins=20
+            )
+            per_class_epistemic_uncertainty = (
+                self.compute_per_class_epistemic_uncertainty(
+                    hard_preds, uncertainty_predictions
+                )
             )
 
         self.track_predictions(
@@ -184,7 +210,10 @@ class NetworkWrapper(LightningModule):
         calibration_info_list = [tmp["calibration_info"] for tmp in outputs]
 
         self.test_evaluation_metrics = self.track_evaluation_metrics(
-            conf_matrices, losses, stage="Test", calibration_info_list=calibration_info_list
+            conf_matrices,
+            losses,
+            stage="Test",
+            calibration_info_list=calibration_info_list,
         )
 
         if self.task == "classification":
@@ -192,12 +221,19 @@ class NetworkWrapper(LightningModule):
             self.track_epistemic_uncertainty_stats(outputs, stage="Test")
 
             fig_ = metrics.compute_calibration_plots(outputs)
-            self.logger.experiment.add_figure("UncertaintyStats/Calibration", fig_, self.current_epoch)
+            self.logger.experiment.add_figure(
+                "UncertaintyStats/Calibration", fig_, self.current_epoch
+            )
 
     def track_classification_metrics(
-        self, conf_matrices: List, stage: str = "Test", calibration_info_list: List = None
+        self,
+        conf_matrices: List,
+        stage: str = "Test",
+        calibration_info_list: List = None,
     ) -> Dict:
-        miou = metrics.mean_iou_from_conf_matrices(conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]])
+        miou = metrics.mean_iou_from_conf_matrices(
+            conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]]
+        )
         per_class_iou = metrics.per_class_iou_from_conf_matrices(
             conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]]
         )
@@ -207,7 +243,9 @@ class NetworkWrapper(LightningModule):
         precision = metrics.precision_from_conf_matrices(
             conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]]
         )
-        recall = metrics.recall_from_conf_matrices(conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]])
+        recall = metrics.recall_from_conf_matrices(
+            conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]]
+        )
         f1_score = metrics.f1_score_from_conf_matrices(
             conf_matrices, ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]]
         )
@@ -244,7 +282,11 @@ class NetworkWrapper(LightningModule):
         return {f"{stage}/MSE": mse, f"{stage}/RMSE": rmse}
 
     def track_evaluation_metrics(
-        self, conf_matrices: List, losses: List, stage: str = "Test", calibration_info_list: List = None
+        self,
+        conf_matrices: List,
+        losses: List,
+        stage: str = "Test",
+        calibration_info_list: List = None,
     ) -> Dict:
         if self.task == "classification":
             return self.track_classification_metrics(
@@ -253,32 +295,47 @@ class NetworkWrapper(LightningModule):
         else:
             return self.track_regression_metrics(losses, stage=stage)
 
-    def track_epistemic_uncertainty_stats(self, outputs: List[torch.Tensor], stage: str = "Validation"):
-        per_class_ep_uncertainties = torch.stack([tmp["per_class_ep_uncertainty"] for tmp in outputs])
+    def track_epistemic_uncertainty_stats(
+        self, outputs: List[torch.Tensor], stage: str = "Validation"
+    ):
+        per_class_ep_uncertainties = torch.stack(
+            [tmp["per_class_ep_uncertainty"] for tmp in outputs]
+        )
         per_class_ep_uncertainty = torch.mean(per_class_ep_uncertainties, dim=0)
 
-        ax = sns.barplot(x=list(range(self.num_classes)), y=per_class_ep_uncertainty.tolist())
+        ax = sns.barplot(
+            x=list(range(self.num_classes)), y=per_class_ep_uncertainty.tolist()
+        )
         ax.set_xlabel("Class Index")
         ax.set_ylabel("Model Uncertainty [0,1]")
 
         if stage == "Test" and self.active_learning:
             plt.savefig(
-                os.path.join(self.al_logger_name, f"per_class_ep_uncertainty_{self.al_iteration}.png"),
+                os.path.join(
+                    self.al_logger_name,
+                    f"per_class_ep_uncertainty_{self.al_iteration}.png",
+                ),
                 dpi=300,
             )
 
         self.logger.experiment.add_figure(
-            f"UncertaintyStats/{stage}/EpistemicPerClass", ax.get_figure(), self.current_epoch
+            f"UncertaintyStats/{stage}/EpistemicPerClass",
+            ax.get_figure(),
+            self.current_epoch,
         )
 
         plt.close()
         plt.clf()
         plt.cla()
 
-    def track_confusion_matrix(self, conf_matrices: List[torch.Tensor], stage: str = "Validation"):
+    def track_confusion_matrix(
+        self, conf_matrices: List[torch.Tensor], stage: str = "Validation"
+    ):
         total_conf_matrix = metrics.total_conf_matrix_from_conf_matrices(conf_matrices)
         df_cm = pd.DataFrame(
-            total_conf_matrix.cpu().numpy(), index=range(self.num_classes), columns=range(self.num_classes)
+            total_conf_matrix.cpu().numpy(),
+            index=range(self.num_classes),
+            columns=range(self.num_classes),
         )
 
         ax = sns.heatmap(df_cm, annot=True, cmap="Spectral")
@@ -287,11 +344,15 @@ class NetworkWrapper(LightningModule):
 
         if stage == "Test" and self.active_learning:
             plt.savefig(
-                os.path.join(self.al_logger_name, f"confusion_matrix_{self.al_iteration}.png"),
+                os.path.join(
+                    self.al_logger_name, f"confusion_matrix_{self.al_iteration}.png"
+                ),
                 dpi=300,
             )
 
-        self.logger.experiment.add_figure(f"ConfusionMatrix/{stage}", ax.get_figure(), self.current_epoch)
+        self.logger.experiment.add_figure(
+            f"ConfusionMatrix/{stage}", ax.get_figure(), self.current_epoch
+        )
 
         plt.close()
         plt.clf()
@@ -320,13 +381,18 @@ class NetworkWrapper(LightningModule):
         if self.task == "classification":
             sample_img_out = utils.toOneHot(sample_img_out, self.cfg["data"]["name"])
             self.logger.experiment.add_image(
-                f"{stage}/Output image", torch.from_numpy(sample_img_out), step, dataformats="HWC"
+                f"{stage}/Output image",
+                torch.from_numpy(sample_img_out),
+                step,
+                dataformats="HWC",
             )
         else:
             sample_img_out = sample_img_out.cpu().numpy()[0, 0, :, :]
             sizes = sample_img_out.shape
             fig = plt.figure()
-            fig.set_size_inches(3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False)
+            fig.set_size_inches(
+                3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False
+            )
             ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
             ax.set_axis_off()
             ax.imshow(sample_img_out, cmap="gray")
@@ -336,18 +402,24 @@ class NetworkWrapper(LightningModule):
         sample_img_in = images[:1]
         sample_anno = targets[:1]
 
-        self.logger.experiment.add_image(f"{stage}/Input image", sample_img_in.squeeze(), step, dataformats="CHW")
+        self.logger.experiment.add_image(
+            f"{stage}/Input image", sample_img_in.squeeze(), step, dataformats="CHW"
+        )
 
         if self.task == "classification":
             sample_prob_prediction = prob_predictions[:1]
             cross_entropy_fn = CrossEntropyLoss(reduction="none")
-            sample_error_img = cross_entropy_fn(sample_prob_prediction, sample_anno).squeeze()
+            sample_error_img = cross_entropy_fn(
+                sample_prob_prediction, sample_anno
+            ).squeeze()
         else:
             sample_error_img = sample_img_out - sample_anno
 
         sizes = sample_img_out.shape
         fig = plt.figure()
-        fig.set_size_inches(3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False)
+        fig.set_size_inches(
+            3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False
+        )
         ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
         ax.set_axis_off()
         ax.imshow(sample_error_img.cpu().numpy(), cmap="gray")
@@ -357,13 +429,18 @@ class NetworkWrapper(LightningModule):
         if self.task == "classification":
             sample_anno = utils.toOneHot(sample_anno, self.cfg["data"]["name"])
             self.logger.experiment.add_image(
-                f"{stage}/Annotation", torch.from_numpy(sample_anno), step, dataformats="HWC"
+                f"{stage}/Annotation",
+                torch.from_numpy(sample_anno),
+                step,
+                dataformats="HWC",
             )
         else:
             sample_anno = sample_anno.cpu().numpy()[0, 0, :, :]
             sizes = sample_anno.shape
             fig = plt.figure()
-            fig.set_size_inches(3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False)
+            fig.set_size_inches(
+                3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False
+            )
             ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
             ax.set_axis_off()
             ax.imshow(sample_anno, cmap="gray")
@@ -374,19 +451,27 @@ class NetworkWrapper(LightningModule):
             sample_ep_uncertainty = epistemic_uncertainties.cpu().numpy()[0, :, :]
             sizes = sample_ep_uncertainty.shape
             fig = plt.figure()
-            fig.set_size_inches(3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False)
+            fig.set_size_inches(
+                3.44 * sizes[0] / sizes[1], 3.44 * sizes[0] / sizes[1], forward=False
+            )
             ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
             ax.set_axis_off()
             ax.imshow(sample_ep_uncertainty, cmap="plasma")
             fig.add_axes(ax)
-            self.logger.experiment.add_figure(f"{stage}/Uncertainty/Epistemic", fig, step)
+            self.logger.experiment.add_figure(
+                f"{stage}/Uncertainty/Epistemic", fig, step
+            )
 
         if dist is not None:
-            sample_aleatoric_unc_out = self.compute_aleatoric_uncertainty(dist[0], dist[1])[0, :, :]
+            sample_aleatoric_unc_out = self.compute_aleatoric_uncertainty(
+                dist[0], dist[1]
+            )[0, :, :]
             fig = plt.figure()
             plt.axis("off")
             plt.imshow(sample_aleatoric_unc_out, cmap="plasma")
-            self.logger.experiment.add_figure(f"{stage}/Uncertainty/Aleatoric", fig, step)
+            self.logger.experiment.add_figure(
+                f"{stage}/Uncertainty/Aleatoric", fig, step
+            )
 
     def compute_aleatoric_uncertainty(self, seg: torch.Tensor, std: torch.Tensor):
         pass
@@ -397,7 +482,9 @@ class NetworkWrapper(LightningModule):
         per_class_ep_uncertainty = torch.zeros(self.num_classes)
         for predicted_class in torch.unique(preds):
             mask = preds == predicted_class
-            per_class_ep_uncertainty[predicted_class.item()] = torch.mean(uncertainty_predictions[mask]).item()
+            per_class_ep_uncertainty[predicted_class.item()] = torch.mean(
+                uncertainty_predictions[mask]
+            ).item()
 
         return per_class_ep_uncertainty
 
@@ -418,9 +505,18 @@ class NetworkWrapper(LightningModule):
 
 
 class AleatoricERFNet(NetworkWrapper):
-    def __init__(self, cfg: Dict, al_logger_name: str = "", al_iteration: int = 0, num_train_data: int = 1):
+    def __init__(
+        self,
+        cfg: Dict,
+        al_logger_name: str = "",
+        al_iteration: int = 0,
+        num_train_data: int = 1,
+    ):
         super(AleatoricERFNet, self).__init__(
-            cfg, al_logger_name=al_logger_name, al_iteration=al_iteration, num_train_data=num_train_data
+            cfg,
+            al_logger_name=al_logger_name,
+            al_iteration=al_iteration,
+            num_train_data=num_train_data,
         )
         self.save_hyperparameters()
 
@@ -437,15 +533,31 @@ class AleatoricERFNet(NetworkWrapper):
     def replace_output_layer(self):
         if self.model.use_shared_decoder:
             self.model.shared_decoder.output_conv = nn.ConvTranspose2d(
-                16, self.num_classes + 1, 2, stride=2, padding=0, output_padding=0, bias=True
+                16,
+                self.num_classes + 1,
+                2,
+                stride=2,
+                padding=0,
+                output_padding=0,
+                bias=True,
             )
         else:
             self.model.segmentation_decoder.output_conv = nn.ConvTranspose2d(
-                16, self.num_classes, 2, stride=2, padding=0, output_padding=0, bias=True
+                16,
+                self.num_classes,
+                2,
+                stride=2,
+                padding=0,
+                output_padding=0,
+                bias=True,
             )
 
-    def get_loss(self, seg: torch.Tensor, std: torch.Tensor, true_seg: torch.Tensor) -> torch.Tensor:
-        sampled_predictions = torch.zeros((self.num_mc_aleatoric, *seg.size()), device=self.device)
+    def get_loss(
+        self, seg: torch.Tensor, std: torch.Tensor, true_seg: torch.Tensor
+    ) -> torch.Tensor:
+        sampled_predictions = torch.zeros(
+            (self.num_mc_aleatoric, *seg.size()), device=self.device
+        )
 
         for i in range(self.num_mc_aleatoric):
             noise_mean = torch.zeros(seg.size(), device=self.device)
@@ -457,11 +569,15 @@ class AleatoricERFNet(NetworkWrapper):
         mean_prediction = torch.mean(sampled_predictions, dim=0)
         return self.loss_fn(mean_prediction, true_seg)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         output_seg, output_std, hidden_representation = self.model(x)
         return output_seg, output_std, hidden_representation
 
-    def compute_aleatoric_uncertainty(self, seg: torch.Tensor, std: torch.Tensor) -> np.array:
+    def compute_aleatoric_uncertainty(
+        self, seg: torch.Tensor, std: torch.Tensor
+    ) -> np.array:
         predictions = []
         softmax = nn.Softmax(dim=1)
         for i in range(self.num_mc_aleatoric):
@@ -472,7 +588,9 @@ class AleatoricERFNet(NetworkWrapper):
             predictions.append(softmax(sampled_seg).cpu().numpy())
 
         mean_predictions = np.mean(predictions, axis=0)
-        return -np.sum(mean_predictions * np.log(mean_predictions + sys.float_info.min), axis=1)
+        return -np.sum(
+            mean_predictions * np.log(mean_predictions + sys.float_info.min), axis=1
+        )
 
     def track_aleatoric_stats(self, std: torch.Tensor):
         self.log("Variance/TrainMin", torch.min(std))
@@ -513,9 +631,18 @@ class AleatoricERFNet(NetworkWrapper):
 
 
 class ERFNet(NetworkWrapper):
-    def __init__(self, cfg: Dict, al_logger_name: str = "", al_iteration: int = 0, num_train_data: int = 1):
+    def __init__(
+        self,
+        cfg: Dict,
+        al_logger_name: str = "",
+        al_iteration: int = 0,
+        num_train_data: int = 1,
+    ):
         super(ERFNet, self).__init__(
-            cfg, al_logger_name=al_logger_name, al_iteration=al_iteration, num_train_data=num_train_data
+            cfg,
+            al_logger_name=al_logger_name,
+            al_iteration=al_iteration,
+            num_train_data=num_train_data,
         )
 
         self.model = modules.ERFNetModel(
@@ -565,8 +692,16 @@ class ERFNet(NetworkWrapper):
 
 
 class EnsembleNet(NetworkWrapper):
-    def __init__(self, cfg: Dict, models: List[nn.Module], al_logger_name: str = "", al_iteration: int = 0):
-        super(EnsembleNet, self).__init__(cfg, al_logger_name=al_logger_name, al_iteration=al_iteration)
+    def __init__(
+        self,
+        cfg: Dict,
+        models: List[nn.Module],
+        al_logger_name: str = "",
+        al_iteration: int = 0,
+    ):
+        super(EnsembleNet, self).__init__(
+            cfg, al_logger_name=al_logger_name, al_iteration=al_iteration
+        )
 
         self.models = models
 
