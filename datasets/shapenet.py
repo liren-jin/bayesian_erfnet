@@ -1,13 +1,9 @@
 import os
-from typing import Dict, List
-
 import cv2
 import numpy as np
 import torch
 from PIL import Image
-
 from transformations import get_transformations, Transformation
-
 from utils.utils import LABELS
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -16,11 +12,11 @@ import glob
 
 
 class ShapenetDataModule(LightningDataModule):
-    def __init__(self, cfg: Dict):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
 
-    def setup(self, stage: str = None):
+    def setup(self, stage):
         path_to_dataset = os.path.join(self.cfg["data"]["path_to_dataset"])
 
         # Assign datasets for use in dataloaders
@@ -43,31 +39,7 @@ class ShapenetDataModule(LightningDataModule):
                 transformations=get_transformations(self.cfg, "test"),
             )
 
-    # def append_data_indices(self, indices: np.array):
-    #     self.data_indices = np.unique(np.append(self.data_indices, indices))
-
-    # def get_data_indices(self) -> np.array:
-    #     return self.data_indices
-
-    # def get_unlabeled_data_indices(self) -> np.array:
-    #     msk = ~np.in1d(self.all_indices, self.data_indices)
-
-    #     return self.all_indices[msk]
-
-    # def unlabeled_dataloader(self) -> DataLoader:
-    #     batch_size = self.cfg["data"]["batch_size"]
-    #     n_workers = self.cfg["data"]["num_workers"]
-
-    #     train_dataset = self._train
-    #     unlabeled_data = Subset(train_dataset, self.get_unlabeled_data_indices())
-
-    #     loader = DataLoader(
-    #         unlabeled_data, batch_size=batch_size, shuffle=False, num_workers=n_workers
-    #     )
-
-    #     return loader
-
-    def train_dataloader(self) -> DataLoader:
+    def train_dataloader(self):
         shuffle = self.cfg["data"]["train_shuffle"]
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
@@ -78,7 +50,7 @@ class ShapenetDataModule(LightningDataModule):
 
         return loader
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self):
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
 
@@ -88,7 +60,7 @@ class ShapenetDataModule(LightningDataModule):
 
         return loader
 
-    def test_dataloader(self) -> DataLoader:
+    def test_dataloader(self):
         batch_size = self.cfg["data"]["batch_size"]
         n_workers = self.cfg["data"]["num_workers"]
 
@@ -135,7 +107,7 @@ class ShapenetDataset(Dataset):
         self.img_to_tensor = transforms.ToTensor()
         self.transformations = transformations
 
-    def __getitem__(self, idx: int) -> Dict:
+    def __getitem__(self, idx):
         path_to_current_img = self.image_files[idx]
         img_pil = Image.open(path_to_current_img)
         img = self.img_to_tensor(img_pil)
@@ -151,7 +123,7 @@ class ShapenetDataset(Dataset):
 
         return {"data": img, "image": img, "anno": anno, "index": idx}
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.image_files)
 
     def get_anno(self, path_to_current_anno):

@@ -1,13 +1,11 @@
-import subprocess
 from os.path import abspath, dirname, join
-
 import click
 import yaml
-from datasets import get_data_module
-from models import get_model
 from pytorch_lightning import Trainer
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from datasets import get_data_module
+from models import get_model
 
 
 ##############################################################################################
@@ -62,9 +60,6 @@ def monitoring_mode(task) -> str:
 def main(config, weights, checkpoint):
     with open(config, "r") as config_file:
         cfg = yaml.safe_load(config_file)
-    cfg["git_commit_version"] = str(
-        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).strip()
-    )
 
     # Load data and model
     data = get_data_module(cfg)

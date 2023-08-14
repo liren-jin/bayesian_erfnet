@@ -117,18 +117,16 @@ class NetworkWrapper(LightningModule):
     def training_step(self, batch: Dict, batch_idx: int):
         pass
 
-    def validation_step(self, batch: dict, batch_idx: int):
+    def validation_step(self, batch: Dict, batch_idx: int):
         pass
 
     def validation_epoch_end(self, outputs):
         conf_matrices = [tmp["conf_matrix"] for tmp in outputs]
         losses = [tmp["loss"] for tmp in outputs]
-        calibration_info_list = [tmp["calibration_info"] for tmp in outputs]
         self.track_evaluation_metrics(
             conf_matrices,
             losses,
             stage="Validation",
-            calibration_info_list=calibration_info_list,
         )
         if self.task == "classification":
             self.track_confusion_matrix(conf_matrices, stage="Validation")
