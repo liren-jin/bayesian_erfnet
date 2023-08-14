@@ -11,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 import torch
 import torch.nn as nn
+import torchvision
 import torchmetrics
 from pytorch_lightning.core.lightning import LightningModule
 
@@ -28,23 +29,13 @@ from models import modules
 #                                                                                            #
 ##############################################################################################
 
-IGNORE_INDEX = {
-    "cityscapes": 19,
-    "weedmap": -100,
-    "rit18": 0,
-    "rit18_merged": 0,
-    "potsdam": 0,
-    "flightmare": 9,
-}
+IGNORE_INDEX = {"cityscapes": 19, "potsdam": 0, "flightmare": 9, "shapenet": None}
 
 
 class NetworkWrapper(LightningModule):
     def __init__(
         self,
         cfg: Dict,
-        al_logger_name: str = "",
-        al_iteration: int = 0,
-        num_train_data: int = 1,
     ):
         super().__init__()
 
@@ -71,11 +62,10 @@ class NetworkWrapper(LightningModule):
         self.num_mc_aleatoric = self.cfg["train"]["num_mc_aleatoric"]
         self.num_mc_epistemic = self.cfg["train"]["num_mc_epistemic"]
 
-        self.active_learning = "active_learning" in self.cfg
-        self.al_logger_name = al_logger_name
-        self.al_iteration = al_iteration
-        self.num_train_data = num_train_data
+        self.ignore_index = IGNORE_INDEX[self.cfg["data"]["name"]]
+
         self.test_evaluation_metrics = {}
+        self.vis_step = 0
 
         self.inv_class_frequencies = None
         if "class_frequencies" in self.cfg["model"]:
@@ -111,7 +101,9 @@ class NetworkWrapper(LightningModule):
         loss_name = self.cfg["model"]["loss"]
         if loss_name == Losses.CROSS_ENTROPY:
             return CrossEntropyLoss(
-                ignore_index=IGNORE_INDEX[self.cfg["data"]["name"]],
+                ignore_index=self.ignore_index
+                if self.ignore_index is not None
+                else -100,
                 weight=self.inv_class_frequencies,
             )
         elif loss_name == Losses.MSE:
@@ -131,78 +123,19 @@ class NetworkWrapper(LightningModule):
     def validation_epoch_end(self, outputs):
         conf_matrices = [tmp["conf_matrix"] for tmp in outputs]
         losses = [tmp["loss"] for tmp in outputs]
+        calibration_info_list = [tmp["calibration_info"] for tmp in outputs]
         self.track_evaluation_metrics(
-            conf_matrices, losses, stage="Validation", calibration_info_list=None
+            conf_matrices,
+            losses,
+            stage="Validation",
+            calibration_info_list=calibration_info_list,
         )
         if self.task == "classification":
             self.track_confusion_matrix(conf_matrices, stage="Validation")
+        self.vis_step = 0
 
     def test_step(self, batch: dict, batch_idx: int):
         pass
-
-    def common_test_step(
-        self, batch: dict, batch_idx: int, aleatoric_dist: Tuple = None
-    ):
-        targets = batch["anno"].to(self.device)
-        (
-            mean_predictions,
-            uncertainty_predictions,
-            hidden_representations,
-        ) = utils.get_predictions(
-            self,
-            batch,
-            num_mc_dropout=self.num_mc_epistemic,
-            aleatoric_model=self.aleatoric_model,
-            num_mc_aleatoric=self.num_mc_aleatoric,
-            ensemble_model=self.ensemble_model,
-            device=self.device,
-            task=self.task,
-        )
-        mean_predictions, uncertainty_predictions = torch.from_numpy(
-            mean_predictions
-        ).to(self.device), torch.from_numpy(uncertainty_predictions).to(self.device)
-
-        if self.task == "classification":
-            _, hard_preds = torch.max(mean_predictions, dim=1)
-        else:
-            hard_preds = mean_predictions
-
-        loss = self.get_loss(mean_predictions, targets)
-        self.log("Test/Loss", loss, prog_bar=True)
-
-        confusion_matrix = None
-        calibration_info = None
-        per_class_epistemic_uncertainty = None
-        if self.task == "classification":
-            confusion_matrix = torchmetrics.functional.confusion_matrix(
-                hard_preds, targets, num_classes=self.num_classes, normalize=None
-            )
-            calibration_info = metrics.compute_calibration_info(
-                mean_predictions, targets, num_bins=20
-            )
-            per_class_epistemic_uncertainty = (
-                self.compute_per_class_epistemic_uncertainty(
-                    hard_preds, uncertainty_predictions
-                )
-            )
-
-        self.track_predictions(
-            batch["data"],
-            hard_preds,
-            mean_predictions,
-            targets,
-            stage="Test",
-            step=batch_idx,
-            epistemic_uncertainties=uncertainty_predictions,
-            dist=aleatoric_dist,
-        )
-
-        return {
-            "conf_matrix": confusion_matrix,
-            "loss": loss,
-            "per_class_ep_uncertainty": per_class_epistemic_uncertainty,
-            "calibration_info": calibration_info,
-        }
 
     def test_epoch_end(self, outputs):
         conf_matrices = [tmp["conf_matrix"] for tmp in outputs]
@@ -342,13 +275,13 @@ class NetworkWrapper(LightningModule):
         ax.set_xlabel("Prediction")
         ax.set_ylabel("Ground Truth")
 
-        if stage == "Test" and self.active_learning:
-            plt.savefig(
-                os.path.join(
-                    self.al_logger_name, f"confusion_matrix_{self.al_iteration}.png"
-                ),
-                dpi=300,
-            )
+        # if stage == "Test" and self.active_learning:
+        #     plt.savefig(
+        #         os.path.join(
+        #             self.al_logger_name, f"confusion_matrix_{self.al_iteration}.png"
+        #         ),
+        #         dpi=300,
+        #     )
 
         self.logger.experiment.add_figure(
             f"ConfusionMatrix/{stage}", ax.get_figure(), self.current_epoch
@@ -496,12 +429,198 @@ class NetworkWrapper(LightningModule):
         )
         return optimizer
 
+    def common_test_step(
+        self, batch: dict, batch_idx: int, aleatoric_dist: Tuple = None
+    ):
+        targets = batch["anno"].to(self.device)
+        (
+            mean_predictions,
+            uncertainty_predictions,
+            hidden_representations,
+        ) = utils.get_predictions(
+            self,
+            batch,
+            num_mc_dropout=self.num_mc_epistemic,
+            aleatoric_model=self.aleatoric_model,
+            num_mc_aleatoric=self.num_mc_aleatoric,
+            ensemble_model=self.ensemble_model,
+            device=self.device,
+            task=self.task,
+        )
+        mean_predictions, uncertainty_predictions = torch.from_numpy(
+            mean_predictions
+        ).to(self.device), torch.from_numpy(uncertainty_predictions).to(self.device)
+
+        if self.task == "classification":
+            _, hard_preds = torch.max(mean_predictions, dim=1)
+        else:
+            hard_preds = mean_predictions
+
+        loss = self.get_loss(mean_predictions, targets)
+        self.log("Test/Loss", loss, prog_bar=True)
+
+        confusion_matrix = None
+        calibration_info = None
+        per_class_epistemic_uncertainty = None
+        if self.task == "classification":
+            confusion_matrix = torchmetrics.functional.confusion_matrix(
+                hard_preds, targets, num_classes=self.num_classes, normalize=None
+            )
+            calibration_info = metrics.compute_calibration_info(
+                mean_predictions, targets, num_bins=20
+            )
+            per_class_epistemic_uncertainty = (
+                self.compute_per_class_epistemic_uncertainty(
+                    hard_preds, uncertainty_predictions
+                )
+            )
+
+        self.track_predictions(
+            batch["data"],
+            hard_preds,
+            mean_predictions,
+            targets,
+            stage="Test",
+            step=batch_idx,
+            epistemic_uncertainties=uncertainty_predictions,
+            dist=aleatoric_dist,
+        )
+
+        return {
+            "conf_matrix": confusion_matrix,
+            "loss": loss,
+            "per_class_ep_uncertainty": per_class_epistemic_uncertainty,
+            "calibration_info": calibration_info,
+        }
+
     @property
     def weight_decay(self) -> float:
-        if not self.active_learning:
-            return self.cfg["train"]["weight_decay"]
+        return self.cfg["train"]["weight_decay"]
 
-        return (1 - self.cfg["model"]["dropout_prob"]) / (2 * self.num_train_data)
+        # return (1 - self.cfg["model"]["dropout_prob"]) / (2 * self.num_train_data)
+
+
+class ERFNet(NetworkWrapper):
+    def __init__(
+        self,
+        cfg: Dict,
+    ):
+        super(ERFNet, self).__init__(
+            cfg,
+        )
+
+        self.model = modules.ERFNetModel(
+            self.num_classes_init,
+            self.in_channels,
+            dropout_prop=self.dropout_prob,
+            deep_encoder=self.deep_encoder,
+            epistemic_version=self.epistemic_version,
+            output_fn=self.output_fn,
+        )
+
+    def replace_output_layer(self):
+        self.model.decoder.output_conv = nn.ConvTranspose2d(
+            16, self.num_classes, 2, stride=2, padding=0, output_padding=0, bias=True
+        )
+
+    def get_loss(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return self.loss_fn(x, y)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        out, hidden_representation = self.model(x)
+        return out, hidden_representation
+
+    def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
+        out, _ = self.forward(batch["data"])
+        loss = self.get_loss(out, batch["anno"])
+
+        self.log("train:loss", loss)
+
+        return loss
+
+    def validation_step(self, batch: dict, batch_idx: int) -> Dict:
+        out, _ = self.forward(batch["data"])
+        loss = self.get_loss(out, batch["anno"])
+        self.log("Validation/Loss", loss, prog_bar=True)
+
+        confusion_matrix = None
+        if self.task == "classification":
+            _, preds = torch.max(out, dim=1)
+            confusion_matrix = torchmetrics.functional.confusion_matrix(
+                preds, batch["anno"], num_classes=self.num_classes, normalize=None
+            )
+        if batch_idx % 50 == 0:
+            self.visualize_step(batch)
+        return {"conf_matrix": confusion_matrix, "loss": loss}
+
+    def test_step(self, batch: dict, batch_idx: int) -> Dict:
+        return self.common_test_step(batch, batch_idx, aleatoric_dist=None)
+
+    def visualize_step(self, batch):
+        self.vis_step += 1
+        targets = batch["anno"].to(self.device)
+        (
+            mean_predictions,
+            uncertainty_predictions,
+            hidden_representations,
+        ) = utils.get_predictions(
+            self,
+            batch,
+            num_mc_dropout=self.num_mc_epistemic,
+            aleatoric_model=self.aleatoric_model,
+            num_mc_aleatoric=self.num_mc_aleatoric,
+            ensemble_model=self.ensemble_model,
+            device=self.device,
+            task=self.task,
+        )
+        mean_predictions, uncertainty_predictions = torch.from_numpy(
+            mean_predictions
+        ).to(self.device), torch.from_numpy(uncertainty_predictions).to(self.device)
+
+        if self.task == "classification":
+            _, hard_preds = torch.max(mean_predictions, dim=1)
+        else:
+            hard_preds = mean_predictions
+
+        # per_class_epistemic_uncertainty = None
+        # if self.task == "classification":
+        #     per_class_epistemic_uncertainty = (
+        #         self.compute_per_class_epistemic_uncertainty(
+        #             hard_preds, uncertainty_predictions
+        #         )
+        #     )
+
+        self.track_predictions(
+            batch["data"],
+            hard_preds,
+            mean_predictions,
+            targets,
+            stage="Validation",
+            step=self.vis_step,
+            epistemic_uncertainties=uncertainty_predictions,
+            dist=None,
+        )
+
+
+class EnsembleNet(NetworkWrapper):
+    def __init__(
+        self,
+        cfg: Dict,
+        models: List[nn.Module],
+        al_logger_name: str = "",
+        al_iteration: int = 0,
+    ):
+        super(EnsembleNet, self).__init__(
+            cfg, al_logger_name=al_logger_name, al_iteration=al_iteration
+        )
+
+        self.models = models
+
+    def get_loss(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return self.loss_fn(x, y)
+
+    def test_step(self, batch: dict, batch_idx: int) -> Dict:
+        return self.common_test_step(batch, batch_idx, aleatoric_dist=None)
 
 
 class AleatoricERFNet(NetworkWrapper):
@@ -628,85 +747,3 @@ class AleatoricERFNet(NetworkWrapper):
         est_seg, est_std, _ = self.forward(batch["data"])
 
         return self.common_test_step(batch, batch_idx, (est_seg, est_std))
-
-
-class ERFNet(NetworkWrapper):
-    def __init__(
-        self,
-        cfg: Dict,
-        al_logger_name: str = "",
-        al_iteration: int = 0,
-        num_train_data: int = 1,
-    ):
-        super(ERFNet, self).__init__(
-            cfg,
-            al_logger_name=al_logger_name,
-            al_iteration=al_iteration,
-            num_train_data=num_train_data,
-        )
-
-        self.model = modules.ERFNetModel(
-            self.num_classes_init,
-            self.in_channels,
-            dropout_prop=self.dropout_prob,
-            deep_encoder=self.deep_encoder,
-            epistemic_version=self.epistemic_version,
-            output_fn=self.output_fn,
-        )
-
-    def replace_output_layer(self):
-        self.model.decoder.output_conv = nn.ConvTranspose2d(
-            16, self.num_classes, 2, stride=2, padding=0, output_padding=0, bias=True
-        )
-
-    def get_loss(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return self.loss_fn(x, y)
-
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        out, hidden_representation = self.model(x)
-        return out, hidden_representation
-
-    def training_step(self, batch: dict, batch_idx: int) -> torch.Tensor:
-        out, _ = self.forward(batch["data"])
-        loss = self.get_loss(out, batch["anno"])
-
-        self.log("train:loss", loss)
-        return loss
-
-    def validation_step(self, batch: dict, batch_idx: int) -> Dict:
-        out, _ = self.forward(batch["data"])
-        loss = self.get_loss(out, batch["anno"])
-        self.log("Validation/Loss", loss, prog_bar=True)
-
-        confusion_matrix = None
-        if self.task == "classification":
-            _, preds = torch.max(out, dim=1)
-            confusion_matrix = torchmetrics.functional.confusion_matrix(
-                preds, batch["anno"], num_classes=self.num_classes, normalize=None
-            )
-
-        return {"conf_matrix": confusion_matrix, "loss": loss}
-
-    def test_step(self, batch: dict, batch_idx: int) -> Dict:
-        return self.common_test_step(batch, batch_idx, aleatoric_dist=None)
-
-
-class EnsembleNet(NetworkWrapper):
-    def __init__(
-        self,
-        cfg: Dict,
-        models: List[nn.Module],
-        al_logger_name: str = "",
-        al_iteration: int = 0,
-    ):
-        super(EnsembleNet, self).__init__(
-            cfg, al_logger_name=al_logger_name, al_iteration=al_iteration
-        )
-
-        self.models = models
-
-    def get_loss(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return self.loss_fn(x, y)
-
-    def test_step(self, batch: dict, batch_idx: int) -> Dict:
-        return self.common_test_step(batch, batch_idx, aleatoric_dist=None)

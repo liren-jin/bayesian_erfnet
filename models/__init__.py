@@ -5,24 +5,16 @@ from models.models import ERFNet, AleatoricERFNet
 from pytorch_lightning.core.lightning import LightningModule
 
 
-def get_model(
-    cfg, al_logger_name: str = "", al_iteration: int = 0, num_train_data: int = 1
-) -> LightningModule:
+def get_model(cfg) -> LightningModule:
     name = cfg["model"]["name"]
     if isinstance(cfg, dict):
         if name == Models.ERFNET:
             return ERFNet(
                 cfg,
-                al_logger_name=al_logger_name,
-                al_iteration=al_iteration,
-                num_train_data=num_train_data,
             )
         elif name == Models.BAYESIAN_ERFNET:
             return AleatoricERFNet(
                 cfg,
-                al_logger_name=al_logger_name,
-                al_iteration=al_iteration,
-                num_train_data=num_train_data,
             )
         else:
             RuntimeError(f"{name} model not implemented")

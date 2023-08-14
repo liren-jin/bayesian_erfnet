@@ -24,7 +24,7 @@ class ShapenetDataModule(LightningDataModule):
         path_to_dataset = os.path.join(self.cfg["data"]["path_to_dataset"])
 
         # Assign datasets for use in dataloaders
-        if stage == "train" or stage is None:
+        if stage == "fit" or stage is None:
             self._train = ShapenetDataset(
                 path_to_dataset,
                 "train",
@@ -112,25 +112,25 @@ class ShapenetDataset(Dataset):
         scene_path = [os.path.join(data_rootdir, scene) for scene in scene_list]
 
         self.image_files = []
-        self.label_files = []
+        self.anno_files = []
         for scene in scene_path:
             image_path = os.path.join(scene, "images")
-            label_path = os.path.join(scene, "semantics")
+            anno_path = os.path.join(scene, "semantics")
             scene_images = [
                 x
                 for x in glob.glob(os.path.join(image_path, "*"))
                 if (x.endswith(".jpg") or x.endswith(".png"))
             ]
             scene_images.sort()
-            scene_labels = [
+            scene_annos = [
                 x
-                for x in glob.glob(os.path.join(label_path, "*"))
+                for x in glob.glob(os.path.join(anno_path, "*"))
                 if (x.endswith(".jpg") or x.endswith(".png"))
             ]
             scene_images.sort()
-            scene_labels.sort()
+            scene_annos.sort()
             self.image_files += scene_images
-            self.label_files += scene_labels
+            self.anno_files += scene_annos
 
         self.img_to_tensor = transforms.ToTensor()
         self.transformations = transformations
@@ -140,35 +140,35 @@ class ShapenetDataset(Dataset):
         img_pil = Image.open(path_to_current_img)
         img = self.img_to_tensor(img_pil)
 
-        path_to_current_label = self.label_files[idx]
-        label = self.get_label(path_to_current_label)
+        path_to_current_anno = self.anno_files[idx]
+        anno = self.get_anno(path_to_current_anno)
 
         # apply a set of transformations to the raw_image, image and anno
         for transformer in self.transformations:
-            img_pil, img, label = transformer(img_pil, img, label)
+            img_pil, img, anno = transformer(img_pil, img, anno)
 
-        label = self.remap_label(label.numpy())
+        anno = self.remap_annotation(anno.numpy())
 
-        return {"data": img, "image": img, "label": label, "index": idx}
+        return {"data": img, "image": img, "anno": anno, "index": idx}
 
     def __len__(self) -> int:
         return len(self.image_files)
 
-    def get_label(self, path_to_current_label):
-        label = cv2.imread(path_to_current_label)
-        label = label.astype(np.int64)  # torch does not support conversion of uint16
-        label = np.moveaxis(label, -1, 0)  # now in CHW mode
-        return torch.from_numpy(label).long()
+    def get_anno(self, path_to_current_anno):
+        anno = cv2.imread(path_to_current_anno)
+        anno = anno.astype(np.int64)  # torch does not support conversion of uint16
+        anno = np.moveaxis(anno, -1, 0)  # now in CHW mode
+        return torch.from_numpy(anno).long()
 
     @staticmethod
-    def remap_label(label):
-        dims = label.shape
+    def remap_annotation(anno):
+        dims = anno.shape
         assert len(dims) == 3, "wrong matrix dimension!!!"
         assert dims[0] == 3, "label must have 3 channels!!!"
 
         shapenet_labels = LABELS["shapenet"]
-        remapped_label = np.ones(
-            (dims[1], dims[2]) * shapenet_labels["background"]["id"]
+        remapped_anno = (
+            np.ones((dims[1], dims[2])) * shapenet_labels["background"]["id"]
         )
 
         for label_key, label_info in shapenet_labels.items():
@@ -176,6 +176,6 @@ class ShapenetDataset(Dataset):
                 continue
 
             label_color = np.flip(np.array(label_info["color"])).reshape((3, 1, 1))
-            remapped_label[(label == label_color).all(axis=0)] = label_info["id"]
+            remapped_anno[(anno == label_color).all(axis=0)] = label_info["id"]
 
-        return torch.from_numpy(remapped_label).long()
+        return torch.from_numpy(remapped_anno).long()

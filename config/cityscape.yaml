@@ -4,7 +4,7 @@ experiment:
 ##Data
 data:
     name: 'shapenet'
-    path_to_dataset: '../dataset/shapenet'
+    path_to_dataset: '/datasets/shapenet'
     img_prop:
         width: 480
         height: 360
@@ -68,6 +68,7 @@ model:
     deep_encoder: false
     shared_decoder: true
     num_classes: 7
+    num_classes_pretrained: 20
     loss: 'xentropy' # xentropy, mse
     in_channels: 3
     dropout_prob: 0.5
