@@ -13,23 +13,49 @@ class SemanticSegmenter:
         for key in list(model_weights):
             model_weights[key.replace("model.", "")] = model_weights.pop(key)
 
-        if cfg["model"]["name"] == "erfnet":
-            model = ERFNetModel
-        elif cfg["model"]["name"] == "erfnet_w_aleatoric":
-            model = AleatoricERFNetModel
+        model_name = cfg["model"]["name"]
+        num_classes = cfg["model"]["num_classes"]
+        epistemic_version = (
+            "standard"
+            if "epistemic_version" not in cfg["model"]
+            else cfg["model"]["epistemic_version"]
+        )
 
-        self.model = model(**cfg)
+        in_channels = cfg["model"]["in_channels"]
+        dropout_prob = cfg["model"]["dropout_prob"]
+        deep_encoder = cfg["model"]["deep_encoder"]
+        shared_decoder = cfg["model"]["shared_decoder"]
+
+        self.num_mc_aleatoric = cfg["train"]["num_mc_aleatoric"]
+        self.num_mc_epistemic = cfg["train"]["num_mc_epistemic"]
+
+        if model_name == "erfnet":
+            self.model = ERFNetModel(
+                num_classes,
+                in_channels,
+                dropout_prop=dropout_prob,
+                deep_encoder=deep_encoder,
+                epistemic_version=epistemic_version,
+            )
+            self.aleatoric_model = False
+        elif model_name == "erfnet_w_aleatoric":
+            self.model = AleatoricERFNetModel(
+                num_classes,
+                in_channels,
+                dropout_prop=dropout_prob,
+                use_shared_decoder=shared_decoder,
+                deep_encoder=deep_encoder,
+                epistemic_version=epistemic_version,
+            )
+            self.aleatoric_model = True
+
         self.model.load_state_dict(model_weights)
-
-        self.num_mc_dropout = cfg["num_mc_dropout"]
-        self.aleatoric_model = cfg["aleatoric_model"]
-        self.num_mc_aleatoric: cfg["num_mc_aleatoric"]
 
         self.use_mc_dropout = self.num_mc_dropout > 1
         self.num_mc_dropout = self.num_mc_dropout if self.num_mc_dropout > 1 else 1
 
         self.num_predictions = self.num_mc_dropout
-        self.device = "cuda"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.softmax = nn.Softmax(dim=1)
 
     def predict(self, image):
@@ -40,22 +66,17 @@ class SemanticSegmenter:
         self.predictions = []
         self.hidden_representations = []
 
-        single_model = self.model.to(self.device)
-        single_model.eval()
+        self.single_model = self.model.to(self.device)
+        self.single_model.eval()
         if self.use_mc_dropout:
-            enable_dropout(single_model)
+            enable_dropout(self.single_model)
 
         for i in range(self.num_predictions):
             with torch.no_grad():
                 if self.aleatoric_model:
-                    est_anno, hidden_representation = sample_from_aleatoric_model(
-                        single_model,
-                        image,
-                        num_mc_aleatoric=self.num_mc_aleatoric,
-                        device=self.device,
-                    )
+                    est_anno, hidden_representation = self.sample_aleatoric(image)
                 else:
-                    est_anno, hidden_representation = single_model.forward(image)
+                    est_anno, hidden_representation = self.single_model(image)
 
                 est_seg_probs = self.softmax(est_anno)
                 self.predictions.append(est_seg_probs.cpu().numpy())
@@ -76,6 +97,19 @@ class SemanticSegmenter:
         )
 
         return mean_predictions, uncertainty_predictions, hidden_representations
+
+    def sample_aleatoric(self, image):
+        est_seg, est_std, hidden_representation = self.single_model(image)
+        sampled_predictions = torch.zeros(
+            (self.num_mc_aleatoric, *est_seg.size()), device=self.device
+        )
+        for j in range(self.num_mc_aleatoric):
+            noise_mean = torch.zeros(est_seg.size(), device=self.device)
+            noise_std = torch.ones(est_seg.size(), device=self.device)
+            epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
+            sampled_seg = est_seg + torch.mul(est_std, epsilon)
+            sampled_predictions[j] = sampled_seg
+        return torch.mean(sampled_predictions, dim=0), hidden_representation
 
 
 def get_trained_segmenter(ckpt_path):

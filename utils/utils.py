@@ -160,83 +160,104 @@ def compute_prediction_stats(
 
 
 def get_predictions(
-    model: LightningModule,
-    batch: Dict,
-    num_mc_dropout: int = 50,
-    aleatoric_model: bool = True,
-    num_mc_aleatoric: int = 50,
-    ensemble_model: bool = False,
-    device: torch.device = None,
-    task: str = "classification",
-) -> Tuple[np.array, np.array, np.array]:
-    use_mc_dropout = num_mc_dropout > 1 and not ensemble_model
+    model,
+    batch,
+    num_mc_dropout=50,
+    aleatoric_model=True,
+    num_mc_aleatoric=50,
+    device=None,
+):
+    use_mc_dropout = num_mc_dropout > 1
     num_mc_dropout = num_mc_dropout if num_mc_dropout > 1 else 1
-
     num_predictions = num_mc_dropout
-    if ensemble_model:
-        num_predictions = len(model.models)
 
     softmax = nn.Softmax(dim=1)
-    predictions = []
+    prob_predictions = []
+    aleatoric_unc_predictions = []
     hidden_representations = []
 
     for i in range(num_predictions):
-        if ensemble_model:
-            single_model = model.models[i].to(device)
-        else:
-            single_model = model.to(device)
-
+        single_model = model.to(device)
         single_model.eval()
+
         if use_mc_dropout:
             enable_dropout(single_model)
 
         with torch.no_grad():
             if aleatoric_model:
-                est_anno, hidden_representation = sample_from_aleatoric_model(
+                (
+                    est_prob,
+                    est_aleatoric_unc,
+                    hidden_representation,
+                ) = sample_from_aleatoric_classification_model(
                     single_model,
                     batch,
                     num_mc_aleatoric=num_mc_aleatoric,
                     device=device,
                 )
             else:
-                est_anno, hidden_representation = single_model.forward(batch["data"])
-
-            if task == "classification":
-                est_seg_probs = softmax(est_anno)
-                predictions.append(est_seg_probs.cpu().numpy())
-            elif task == "regression":
-                predictions.append(est_anno.cpu().numpy())
-            else:
-                raise NotImplementedError(
-                    f"{task} output non-linearity not implemented!"
+                est_prob, hidden_representation = single_model.forward(batch["data"])
+                est_prob, est_aleatoric_unc = softmax(est_prob), torch.zeros_like(
+                    est_prob[:, 0, :, :], device=device
                 )
 
+            prob_predictions.append(est_prob.cpu().numpy())
+            aleatoric_unc_predictions.append(est_aleatoric_unc.squeeze(1).cpu().numpy())
             hidden_representations.append(hidden_representation.cpu().numpy())
 
     (
-        mean_predictions,
-        variance_predictions,
-        entropy_predictions,
-        mutual_info_predictions,
-        hidden_representations,
+        prob_predictions,
+        epistemic_variance_predictions,
+        epistemic_entropy_predictions,
+        epistemic_mutual_info_predictions,
+        epistemic_hidden_representations,
     ) = compute_prediction_stats(
-        np.array(predictions), np.array(hidden_representations)
+        np.array(prob_predictions),
+        hidden_representations=np.array(hidden_representations),
+    )
+    aleatoric_unc_predictions = np.mean(np.array(aleatoric_unc_predictions), axis=0)
+    hidden_representations = np.mean(np.array(hidden_representations), axis=0)
+
+    epistemic_unc_predictions = (
+        epistemic_mutual_info_predictions
+        if use_mc_dropout
+        else epistemic_entropy_predictions
     )
 
-    if task == "regression":
-        uncertainty_predictions = variance_predictions
-    elif task == "classification":
-        uncertainty_predictions = (
-            mutual_info_predictions
-            if use_mc_dropout or ensemble_model
-            else entropy_predictions
-        )
-    else:
-        raise NotImplementedError(
-            f"Uncertainty measure for {task} task not implemented!"
-        )
+    return (
+        prob_predictions,
+        epistemic_unc_predictions,
+        aleatoric_unc_predictions,
+        hidden_representations,
+    )
 
-    return mean_predictions, uncertainty_predictions, hidden_representations
+
+def sample_from_aleatoric_classification_model(
+    model: LightningModule,
+    batch: Dict,
+    num_mc_aleatoric: int = 50,
+    device: torch.device = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    softmax = nn.Softmax(dim=1)
+    est_seg, est_std, hidden_representation = model.forward(batch["data"])
+    sampled_predictions = torch.zeros(
+        (num_mc_aleatoric, *est_seg.size()), device=device
+    )
+    for j in range(num_mc_aleatoric):
+        noise_mean = torch.zeros(est_seg.size(), device=device)
+        noise_std = torch.ones(est_seg.size(), device=device)
+        epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
+        sampled_seg = est_seg + torch.mul(est_std, epsilon)
+        sampled_predictions[j] = softmax(sampled_seg)
+
+    mean_predictions, _, entropy_predictions, _, _ = compute_prediction_stats(
+        sampled_predictions.cpu().numpy(), hidden_representations=None
+    )
+    return (
+        torch.from_numpy(mean_predictions),
+        torch.from_numpy(entropy_predictions),
+        hidden_representation,
+    )
 
 
 def infer_anno_and_epistemic_uncertainty_from_image(

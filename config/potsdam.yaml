@@ -76,7 +76,7 @@ model:
         max_value: 25.5
     loss: 'xentropy' # xentropy, mse
     in_channels: 3
-    dropout_prob: 0.5
+    dropout_prob: 0.3
     # class_frequencies:
     #   - 0.0306
     #   - 0.1668

@@ -58,15 +58,6 @@ class NetworkWrapper(LightningModule):
             self.inv_class_frequencies = class_frequencies.sum() / class_frequencies
             self.inv_class_frequencies = self.inv_class_frequencies.to(self.device)
 
-    @staticmethod
-    def identity_output_fn(x):
-        identity_fn = nn.Identity()
-        return identity_fn(x)
-
-    @property
-    def output_fn(self):
-        return self.identity_output_fn
-
     @property
     def loss_fn(self):
         loss_name = self.cfg["model"]["loss"]
@@ -99,6 +90,41 @@ class NetworkWrapper(LightningModule):
 
     def test_step(self, batch, batch_idx):
         pass
+
+    def visualize_step(self, batch):
+        self.vis_interval += 1
+        targets = batch["anno"].to(self.device)
+        (
+            mean_predictions,
+            epistemic_unc_predictions,
+            aleatoric_unc_predictions,
+            hidden_representations,
+        ) = utils.get_predictions(
+            self,
+            batch,
+            num_mc_dropout=self.num_mc_epistemic,
+            aleatoric_model=self.aleatoric_model,
+            num_mc_aleatoric=self.num_mc_aleatoric,
+            device=self.device,
+        )
+        mean_predictions, epistemic_unc_predictions, aleatoric_unc_predictions = (
+            torch.from_numpy(mean_predictions).to(self.device),
+            torch.from_numpy(epistemic_unc_predictions).to(self.device),
+            torch.from_numpy(aleatoric_unc_predictions).to(self.device),
+        )
+
+        _, hard_preds = torch.max(mean_predictions, dim=1)
+
+        self.track_predictions(
+            batch["data"],
+            hard_preds,
+            mean_predictions,
+            targets,
+            stage="Validation",
+            step=self.vis_interval,
+            epistemic_uncertainties=epistemic_unc_predictions,
+            aleatoric_uncertainties=aleatoric_unc_predictions,
+        )
 
     def validation_epoch_end(self, outputs):
         conf_matrices = [tmp["conf_matrix"] for tmp in outputs]
@@ -241,7 +267,7 @@ class NetworkWrapper(LightningModule):
         stage="Train",
         step=0,
         epistemic_uncertainties=None,
-        dist=None,
+        aleatoric_uncertainties=None,
     ):
         sample_img_out = hard_predictions[:1]
         sample_img_out = utils.toOneHot(sample_img_out, self.cfg["data"]["name"])
@@ -283,12 +309,12 @@ class NetworkWrapper(LightningModule):
             dataformats="HWC",
         )
         if epistemic_uncertainties is not None:
-            sample_ep_uncertainty = epistemic_uncertainties.cpu().numpy()[0, :, :]
-            sizes = sample_ep_uncertainty.shape
+            sample_ep_unc_out = epistemic_uncertainties.cpu().numpy()[0, :, :]
+            sizes = sample_ep_unc_out.shape
             fig = plt.figure(figsize=(px * sizes[1], px * sizes[0]))
             ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
             ax.set_axis_off()
-            ax.imshow(sample_ep_uncertainty, cmap="plasma")
+            ax.imshow(sample_ep_unc_out, cmap="plasma")
             fig.add_axes(ax)
             self.logger.experiment.add_figure(
                 f"{stage}/Uncertainty/Epistemic", fig, step
@@ -296,14 +322,13 @@ class NetworkWrapper(LightningModule):
             plt.cla()
             plt.clf()
 
-        if dist is not None:
-            sample_aleatoric_unc_out = self.compute_aleatoric_uncertainty(
-                dist[0], dist[1]
-            )[0, :, :]
-            fig = plt.figure(figsize=(px * sizes[0], px * sizes[1]))
+        if aleatoric_uncertainties is not None:
+            sample_al_unc_out = aleatoric_uncertainties.cpu().numpy()[0, :, :]
+            sizes = sample_ep_unc_out.shape
+            fig = plt.figure(figsize=(px * sizes[1], px * sizes[0]))
             ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
             ax.set_axis_off()
-            ax.imshow(sample_aleatoric_unc_out, cmap="plasma")
+            ax.imshow(sample_al_unc_out, cmap="plasma")
             fig.add_axes(ax)
             self.logger.experiment.add_figure(
                 f"{stage}/Uncertainty/Aleatoric", fig, step
@@ -328,7 +353,8 @@ class NetworkWrapper(LightningModule):
         targets = batch["anno"].to(self.device)
         (
             mean_predictions,
-            uncertainty_predictions,
+            epistemic_unc_predictions,
+            aleatoric_unc_predictions,
             hidden_representations,
         ) = utils.get_predictions(
             self,
@@ -340,9 +366,11 @@ class NetworkWrapper(LightningModule):
             device=self.device,
             task="classification",
         )
-        mean_predictions, uncertainty_predictions = torch.from_numpy(
-            mean_predictions
-        ).to(self.device), torch.from_numpy(uncertainty_predictions).to(self.device)
+        mean_predictions, epistemic_unc_predictions, aleatoric_unc_predictions = (
+            torch.from_numpy(mean_predictions).to(self.device),
+            torch.from_numpy(epistemic_unc_predictions).to(self.device),
+            torch.from_numpy(aleatoric_unc_predictions).to(self.device),
+        )
 
         _, hard_preds = torch.max(mean_predictions, dim=1)
 
@@ -359,7 +387,7 @@ class NetworkWrapper(LightningModule):
             mean_predictions, targets, num_bins=20
         )
         per_class_epistemic_uncertainty = self.compute_per_class_epistemic_uncertainty(
-            hard_preds, uncertainty_predictions
+            hard_preds, epistemic_unc_predictions
         )
 
         self.track_predictions(
@@ -369,8 +397,8 @@ class NetworkWrapper(LightningModule):
             targets,
             stage="Test",
             step=batch_idx,
-            epistemic_uncertainties=uncertainty_predictions,
-            dist=aleatoric_dist,
+            epistemic_uncertainties=epistemic_unc_predictions,
+            aleatoric_uncertainties=aleatoric_unc_predictions,
         )
 
         return {
@@ -398,7 +426,6 @@ class ERFNet(NetworkWrapper):
             dropout_prop=self.dropout_prob,
             deep_encoder=self.deep_encoder,
             epistemic_version=self.epistemic_version,
-            output_fn=self.output_fn,
         )
 
     def replace_output_layer(self):
@@ -439,40 +466,6 @@ class ERFNet(NetworkWrapper):
     def test_step(self, batch, batch_idx):
         return self.common_test_step(batch, batch_idx, aleatoric_dist=None)
 
-    def visualize_step(self, batch):
-        self.vis_interval += 1
-        targets = batch["anno"].to(self.device)
-        (
-            mean_predictions,
-            uncertainty_predictions,
-            hidden_representations,
-        ) = utils.get_predictions(
-            self,
-            batch,
-            num_mc_dropout=self.num_mc_epistemic,
-            aleatoric_model=self.aleatoric_model,
-            num_mc_aleatoric=self.num_mc_aleatoric,
-            ensemble_model=False,
-            device=self.device,
-            task="classification",
-        )
-        mean_predictions, uncertainty_predictions = torch.from_numpy(
-            mean_predictions
-        ).to(self.device), torch.from_numpy(uncertainty_predictions).to(self.device)
-
-        _, hard_preds = torch.max(mean_predictions, dim=1)
-
-        self.track_predictions(
-            batch["data"],
-            hard_preds,
-            mean_predictions,
-            targets,
-            stage="Validation",
-            step=self.vis_interval,
-            epistemic_uncertainties=uncertainty_predictions,
-            dist=None,
-        )
-
 
 class AleatoricERFNet(NetworkWrapper):
     def __init__(self, cfg):
@@ -486,7 +479,6 @@ class AleatoricERFNet(NetworkWrapper):
             use_shared_decoder=self.shared_decoder,
             deep_encoder=self.deep_encoder,
             epistemic_version=self.epistemic_version,
-            output_fn=self.output_fn,
         )
 
     def replace_output_layer(self):
