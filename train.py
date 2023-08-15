@@ -16,24 +16,6 @@ from models import get_model
 ##############################################################################################
 
 
-def monitoring_metric(task) -> str:
-    if task == "classification":
-        return "mIoU"
-    elif task == "regression":
-        return "RMSE"
-    else:
-        raise NotImplementedError(f"No monitoring metric implemented for {task} task!")
-
-
-def monitoring_mode(task) -> str:
-    if task == "classification":
-        return "max"
-    elif task == "regression":
-        return "min"
-    else:
-        raise NotImplementedError(f"No monitoring mode implemented for {task} task!")
-
-
 @click.command()
 ### Add your options here
 @click.option(
@@ -72,9 +54,9 @@ def main(config, weights, checkpoint):
     # Add callbacks
     lr_monitor = LearningRateMonitor(logging_interval="step")
     checkpoint_saver = ModelCheckpoint(
-        monitor=f"Validation/{monitoring_metric(cfg['model']['task'])}",
+        monitor="Validation/mIoU",
         filename=cfg["experiment"]["id"] + "_{epoch:02d}_{iou:.2f}",
-        mode=monitoring_mode(cfg["model"]["task"]),
+        mode="max",
         save_last=True,
     )
 

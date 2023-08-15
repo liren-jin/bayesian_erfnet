@@ -14,6 +14,9 @@ class Losses:
     MSE = "mse"
 
 
+IGNORE_INDEX = {"cityscapes": 19, "potsdam": 0, "flightmare": 9, "shapenet": None}
+
+
 class Maps:
     # Federico original
     # MERGE = {
