@@ -109,7 +109,7 @@ class SemanticSegmenter:
         else:
             raise RuntimeError("unknown uncertainty mode")
 
-        return mean_predictions, uncertainty_predictions
+        return mean_predictions.cpu(), uncertainty_predictions.cpu()
 
     def sample_aleatoric(self, image):
         est_seg, est_std, _ = self.single_model(image)
@@ -127,8 +127,8 @@ class SemanticSegmenter:
             sampled_predictions
         )
         return (
-            mean_predictions.cpu(),
-            entropy_predictions.cpu(),
+            mean_predictions,
+            entropy_predictions,
         )
 
 
