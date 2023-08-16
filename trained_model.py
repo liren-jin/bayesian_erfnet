@@ -7,7 +7,7 @@ from utils.utils import *
 class SemanticSegmenter:
     def __init__(self, ckpt_path):
         ckpt_file = torch.load(ckpt_path)
-        cfg = ckpt_file["hyper_parameters"]
+        cfg = ckpt_file["hyper_parameters"]["cfg"]
         model_weights = ckpt_file["state_dict"]
 
         for key in list(model_weights):
