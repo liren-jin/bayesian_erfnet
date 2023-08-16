@@ -113,49 +113,54 @@ def enable_dropout(model: nn.Module):
             m.train()
 
 
-def sample_from_aleatoric_model(
-    model: LightningModule,
-    batch: Dict,
-    num_mc_aleatoric: int = 50,
-    device: torch.device = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    est_seg, est_std, hidden_representation = model.forward(batch["data"])
-    sampled_predictions = torch.zeros(
-        (num_mc_aleatoric, *est_seg.size()), device=device
-    )
-    for j in range(num_mc_aleatoric):
-        noise_mean = torch.zeros(est_seg.size(), device=device)
-        noise_std = torch.ones(est_seg.size(), device=device)
-        epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
-        sampled_seg = est_seg + torch.mul(est_std, epsilon)
-        sampled_predictions[j] = sampled_seg
-    return torch.mean(sampled_predictions, dim=0), hidden_representation
+# def sample_from_aleatoric_model(
+#     model: LightningModule,
+#     batch: Dict,
+#     num_mc_aleatoric: int = 50,
+#     device: torch.device = None,
+# ) -> Tuple[torch.Tensor, torch.Tensor]:
+#     est_seg, est_std, hidden_representation = model.forward(batch["data"])
+#     sampled_predictions = torch.zeros(
+#         (num_mc_aleatoric, *est_seg.size()), device=device
+#     )
+#     for j in range(num_mc_aleatoric):
+#         noise_mean = torch.zeros(est_seg.size(), device=device)
+#         noise_std = torch.ones(est_seg.size(), device=device)
+#         epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
+#         sampled_seg = est_seg + torch.mul(est_std, epsilon)
+#         sampled_predictions[j] = sampled_seg
+#     return torch.mean(sampled_predictions, dim=0), hidden_representation
 
 
-def compute_prediction_stats(
-    predictions: np.array, hidden_representations: np.array
-) -> Tuple[np.array, np.array, np.array, np.array, np.array]:
-    mean_predictions = np.mean(predictions, axis=0)
-
-    variance_predictions = np.var(predictions, axis=0)
+def compute_prediction_stats(predictions, normalized=False):
+    mean_predictions = torch.mean(predictions, dim=0)
+    class_num = mean_predictions.shape[-1]
+    variance_predictions = torch.var(predictions, dim=0)
     if variance_predictions.shape[1] == 1:
-        variance_predictions = variance_predictions.squeeze(axis=1)
+        variance_predictions = variance_predictions.squeeze(dim=1)
 
-    entropy_predictions = -np.sum(
-        mean_predictions * np.log(mean_predictions + 10 ** (-8)), axis=1
-    )
-    mutual_info_predictions = entropy_predictions - np.mean(
-        np.sum(-predictions * np.log(predictions + 10 ** (-8)), axis=2), axis=0
-    )
+    if normalized:
+        entropy_predictions = -torch.sum(
+            mean_predictions * torch.log(mean_predictions + 10 ** (-8)), dim=1
+        ) / torch.log(class_num)
 
-    hidden_representations = np.mean(hidden_representations, axis=0)
-
+        mutual_info_predictions = entropy_predictions - torch.mean(
+            torch.sum(-predictions * torch.log(predictions + 10 ** (-8)), dim=2)
+            / torch.log(class_num),
+            dim=0,
+        )
+    else:
+        entropy_predictions = -torch.sum(
+            mean_predictions * torch.log(mean_predictions + 10 ** (-8)), dim=1
+        )
+        mutual_info_predictions = entropy_predictions - torch.mean(
+            torch.sum(-predictions * torch.log(predictions + 10 ** (-8)), dim=2), dim=0
+        )
     return (
         mean_predictions,
         variance_predictions,
         entropy_predictions,
         mutual_info_predictions,
-        hidden_representations,
     )
 
 
@@ -188,7 +193,6 @@ def get_predictions(
                 (
                     est_prob,
                     est_aleatoric_unc,
-                    hidden_representation,
                 ) = sample_from_aleatoric_classification_model(
                     single_model,
                     batch,
@@ -196,27 +200,24 @@ def get_predictions(
                     device=device,
                 )
             else:
-                est_prob, hidden_representation = single_model.forward(batch["data"])
+                est_prob, _ = single_model.forward(batch["data"])
                 est_prob, est_aleatoric_unc = softmax(est_prob), torch.zeros_like(
                     est_prob[:, 0, :, :], device=device
                 )
 
-            prob_predictions.append(est_prob.cpu().numpy())
-            aleatoric_unc_predictions.append(est_aleatoric_unc.squeeze(1).cpu().numpy())
-            hidden_representations.append(hidden_representation.cpu().numpy())
+            prob_predictions.append(est_prob)
+            aleatoric_unc_predictions.append(est_aleatoric_unc.squeeze(1))
+
+    prob_predictions = torch.stack(prob_predictions)
+    aleatoric_unc_predictions = torch.stack(aleatoric_unc_predictions)
 
     (
         prob_predictions,
         epistemic_variance_predictions,
         epistemic_entropy_predictions,
         epistemic_mutual_info_predictions,
-        epistemic_hidden_representations,
-    ) = compute_prediction_stats(
-        np.array(prob_predictions),
-        hidden_representations=np.array(hidden_representations),
-    )
-    aleatoric_unc_predictions = np.mean(np.array(aleatoric_unc_predictions), axis=0)
-    hidden_representations = np.mean(np.array(hidden_representations), axis=0)
+    ) = compute_prediction_stats(prob_predictions)
+    aleatoric_unc_predictions = torch.mean(aleatoric_unc_predictions, dim=0)
 
     epistemic_unc_predictions = (
         epistemic_mutual_info_predictions
@@ -228,7 +229,6 @@ def get_predictions(
         prob_predictions,
         epistemic_unc_predictions,
         aleatoric_unc_predictions,
-        hidden_representations,
     )
 
 
@@ -239,7 +239,7 @@ def sample_from_aleatoric_classification_model(
     device: torch.device = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     softmax = nn.Softmax(dim=1)
-    est_seg, est_std, hidden_representation = model.forward(batch["data"])
+    est_seg, est_std, _ = model.forward(batch["data"])
     sampled_predictions = torch.zeros(
         (num_mc_aleatoric, *est_seg.size()), device=device
     )
@@ -250,13 +250,12 @@ def sample_from_aleatoric_classification_model(
         sampled_seg = est_seg + torch.mul(est_std, epsilon)
         sampled_predictions[j] = softmax(sampled_seg)
 
-    mean_predictions, _, entropy_predictions, _, _ = compute_prediction_stats(
-        sampled_predictions.cpu().numpy(), hidden_representations=None
+    mean_predictions, _, entropy_predictions, _ = compute_prediction_stats(
+        sampled_predictions
     )
     return (
-        torch.from_numpy(mean_predictions),
-        torch.from_numpy(entropy_predictions),
-        hidden_representation,
+        mean_predictions,
+        entropy_predictions,
     )
 
 

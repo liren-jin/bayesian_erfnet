@@ -6,7 +6,7 @@ class ActiveLearners:
 
 class Models:
     ERFNET = "erfnet"
-    BAYESIAN_ERFNET = "bayesian_erfnet"
+    ERFNET_W_ALEATORIC = "erfnet_w_aleatoric"
 
 
 class Losses:

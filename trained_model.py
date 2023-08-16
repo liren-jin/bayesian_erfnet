@@ -5,7 +5,9 @@ from utils.utils import *
 
 
 class SemanticSegmenter:
-    def __init__(self, ckpt_path):
+    def __init__(self, ckpt_path, uncertainty_mode, device):
+        self.device = device
+        self.uncertainty_mode = uncertainty_mode
         ckpt_file = torch.load(ckpt_path)
         cfg = ckpt_file["hyper_parameters"]["cfg"]
         model_weights = ckpt_file["state_dict"]
@@ -55,7 +57,6 @@ class SemanticSegmenter:
         self.num_mc_dropout = self.num_mc_dropout if self.num_mc_dropout > 1 else 1
 
         self.num_predictions = self.num_mc_dropout
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.softmax = nn.Softmax(dim=1)
 
     def predict(self, image):
@@ -63,8 +64,8 @@ class SemanticSegmenter:
         if len(image.shape) == 3:
             image = image.unsqueeze(0)
 
-        self.predictions = []
-        self.hidden_representations = []
+        prob_predictions = []
+        aleatoric_unc_predictions = []
 
         self.single_model = self.model.to(self.device)
         self.single_model.eval()
@@ -74,32 +75,44 @@ class SemanticSegmenter:
         for i in range(self.num_predictions):
             with torch.no_grad():
                 if self.aleatoric_model:
-                    est_anno, hidden_representation = self.sample_aleatoric(image)
+                    est_prob, est_aleatoric_unc = self.sample_aleatoric(image)
                 else:
-                    est_anno, hidden_representation = self.single_model(image)
+                    est_prob, _ = self.single_model(image)
+                    est_prob, est_aleatoric_unc = self.softmax(
+                        est_prob
+                    ), torch.zeros_like(est_prob[:, 0, :, :], device=self.device)
 
-                est_seg_probs = self.softmax(est_anno)
-                self.predictions.append(est_seg_probs.cpu().numpy())
-                self.hidden_representations.append(hidden_representation.cpu().numpy())
+                prob_predictions.append(est_prob)
+                aleatoric_unc_predictions.append(est_aleatoric_unc.squeeze(1))
+
+        prob_predictions = torch.stack(prob_predictions)
+        aleatoric_unc_predictions = torch.stack(aleatoric_unc_predictions)
 
         (
             mean_predictions,
-            variance_predictions,
-            entropy_predictions,
-            mutual_info_predictions,
-            hidden_representations,
-        ) = compute_prediction_stats(
-            np.array(self.predictions), np.array(self.hidden_representations)
-        )
+            epistemic_variance_predictions,
+            predictive_entropy_predictions,
+            epistemic_mutual_info_predictions,
+        ) = compute_prediction_stats(prob_predictions)
+        aleatoric_unc_predictions = torch.mean(aleatoric_unc_predictions, dim=0)
 
-        uncertainty_predictions = (
-            mutual_info_predictions if self.use_mc_dropout else entropy_predictions
-        )
+        if self.uncertainty_mode == "predictive":
+            uncertainty_predictions = predictive_entropy_predictions
+        elif self.uncertainty_mode == "epstemic":
+            uncertainty_predictions = epistemic_mutual_info_predictions
+        elif self.uncertainty_mode == "aleatoric":
+            uncertainty_predictions = aleatoric_unc_predictions
+        elif self.uncertainty_mode == "comnbined":
+            uncertainty_predictions = (
+                epistemic_mutual_info_predictions + aleatoric_unc_predictions
+            )
+        else:
+            raise RuntimeError("unknown uncertainty mode")
 
-        return mean_predictions, uncertainty_predictions, hidden_representations
+        return mean_predictions, uncertainty_predictions
 
     def sample_aleatoric(self, image):
-        est_seg, est_std, hidden_representation = self.single_model(image)
+        est_seg, est_std, _ = self.single_model(image)
         sampled_predictions = torch.zeros(
             (self.num_mc_aleatoric, *est_seg.size()), device=self.device
         )
@@ -108,9 +121,18 @@ class SemanticSegmenter:
             noise_std = torch.ones(est_seg.size(), device=self.device)
             epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
             sampled_seg = est_seg + torch.mul(est_std, epsilon)
-            sampled_predictions[j] = sampled_seg
-        return torch.mean(sampled_predictions, dim=0), hidden_representation
+            sampled_predictions[j] = self.softmax(sampled_seg)
+
+        mean_predictions, _, entropy_predictions, _ = compute_prediction_stats(
+            sampled_predictions
+        )
+        return (
+            mean_predictions,
+            entropy_predictions,
+        )
 
 
-def get_trained_segmenter(ckpt_path):
-    return SemanticSegmenter(ckpt_path)
+def get_segmenter(args, device):
+    ckpt_path = args.ckpt_path
+    uncertainty_mode = args.uncertainty_mode
+    return SemanticSegmenter(ckpt_path, uncertainty_mode, device)

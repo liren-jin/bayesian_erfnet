@@ -157,22 +157,18 @@ class NetworkWrapper(LightningModule):
             mean_predictions,
             epistemic_unc_predictions,
             aleatoric_unc_predictions,
-            hidden_representations,
         ) = utils.get_predictions(
             self,
             batch,
             num_mc_dropout=self.num_mc_epistemic,
             aleatoric_model=self.aleatoric_model,
             num_mc_aleatoric=self.num_mc_aleatoric,
-            ensemble_model=False,
             device=self.device,
-            task="classification",
-        )
-        mean_predictions, epistemic_unc_predictions, aleatoric_unc_predictions = (
-            torch.from_numpy(mean_predictions).to(self.device),
-            torch.from_numpy(epistemic_unc_predictions).to(self.device),
-            torch.from_numpy(aleatoric_unc_predictions).to(self.device),
-        )
+        # mean_predictions, epistemic_unc_predictions, aleatoric_unc_predictions = (
+        #     mean_predictions,
+        #     epistemic_unc_predictions,
+        #     aleatoric_unc_predictions,
+        # )
 
         _, hard_predictions = torch.max(mean_predictions, dim=1)
         return (
@@ -405,8 +401,6 @@ class NetworkWrapper(LightningModule):
     @property
     def weight_decay(self):
         return self.cfg["train"]["weight_decay"]
-
-        # return (1 - self.cfg["model"]["dropout_prob"]) / (2 * self.num_train_data)
 
 
 class ERFNet(NetworkWrapper):

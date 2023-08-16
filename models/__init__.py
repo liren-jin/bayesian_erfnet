@@ -12,7 +12,7 @@ def get_model(cfg) -> LightningModule:
             return ERFNet(
                 cfg,
             )
-        elif name == Models.BAYESIAN_ERFNET:
+        elif name == Models.ERFNET_W_ALEATORIC:
             return AleatoricERFNet(
                 cfg,
             )

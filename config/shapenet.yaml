@@ -59,9 +59,9 @@ test:
 
 ##Network
 model:
-    name: 'erfnet'
+    name: 'erfnet_w_aleatoric'
     task: 'classification' # regression, classification
-    aleatoric_model: false
+    aleatoric_model: true
     ensemble_model: false
     num_models: 1
     epistemic_version: 'all'
