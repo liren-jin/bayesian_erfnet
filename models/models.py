@@ -15,7 +15,7 @@ from pytorch_lightning.core.lightning import LightningModule
 
 import utils.utils as utils
 from constants import Losses, IGNORE_INDEX
-from models.loss import CrossEntropyLoss
+from models.loss import CrossEntropyLoss, NLLLoss
 from utils import metrics
 from models import modules
 
@@ -63,6 +63,13 @@ class NetworkWrapper(LightningModule):
         loss_name = self.cfg["model"]["loss"]
         if loss_name == Losses.CROSS_ENTROPY:
             return CrossEntropyLoss(
+                ignore_index=self.ignore_index
+                if self.ignore_index is not None
+                else -100,
+                weight=self.inv_class_frequencies,
+            )
+        elif loss_name == Losses.NLL:
+            return NLLLoss(
                 ignore_index=self.ignore_index
                 if self.ignore_index is not None
                 else -100,
@@ -164,13 +171,10 @@ class NetworkWrapper(LightningModule):
             aleatoric_model=self.aleatoric_model,
             num_mc_aleatoric=self.num_mc_aleatoric,
             device=self.device,
-        # mean_predictions, epistemic_unc_predictions, aleatoric_unc_predictions = (
-        #     mean_predictions,
-        #     epistemic_unc_predictions,
-        #     aleatoric_unc_predictions,
-        # )
+        )
 
         _, hard_predictions = torch.max(mean_predictions, dim=1)
+
         return (
             mean_predictions,
             hard_predictions,
@@ -464,6 +468,7 @@ class AleatoricERFNet(NetworkWrapper):
             deep_encoder=self.deep_encoder,
             epistemic_version=self.epistemic_version,
         )
+        self.softmax = nn.Softmax(dim=-1)
 
     def replace_output_layer(self):
         if self.model.use_shared_decoder:
@@ -497,7 +502,7 @@ class AleatoricERFNet(NetworkWrapper):
             noise_std = torch.ones(seg.size(), device=self.device)
             epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
             sampled_seg = seg + torch.mul(std, epsilon)
-            sampled_predictions[i] = sampled_seg
+            sampled_predictions[i] = self.softmax(sampled_seg)
 
         mean_prediction = torch.mean(sampled_predictions, dim=0)
         return self.loss_fn(mean_prediction, true_seg)
@@ -508,13 +513,12 @@ class AleatoricERFNet(NetworkWrapper):
 
     def compute_aleatoric_uncertainty(self, seg, std):
         predictions = []
-        softmax = nn.Softmax(dim=1)
         for i in range(self.num_mc_aleatoric):
             noise_mean = torch.zeros(seg.size(), device=self.device)
             noise_std = torch.ones(seg.size(), device=self.device)
             epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
             sampled_seg = seg + torch.mul(std, epsilon)
-            predictions.append(softmax(sampled_seg).cpu().numpy())
+            predictions.append(self.softmax(sampled_seg).cpu().numpy())
 
         mean_predictions = np.mean(predictions, axis=0)
         return -np.sum(

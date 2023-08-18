@@ -38,10 +38,10 @@ train:
         #   width: 344
         #   keep_aspect_ratio: true
         color_jitter:
-         brightness: 0.0 # 0.0-1.0
-         contrast: 0.0 # 0.0-1.0
-         saturation: 0.8 # 0.0-1.0
-         hue: 0.0 # -0.5-0.5
+         brightness: 0.1 # 0.0-1.0
+         contrast: 0.1 # 0.0-1.0
+         saturation: 0.1 # 0.0-1.0
+         hue: 0.1 # -0.5-0.5
 
 val:
     transformations:
@@ -67,8 +67,8 @@ model:
     epistemic_version: 'all'
     deep_encoder: false
     shared_decoder: true
-    num_classes: 7
-    loss: 'xentropy' # xentropy, mse
+    num_classes: 8
+    loss: 'nll' # xentropy, mse, nll
     in_channels: 3
     dropout_prob: 0.3
     # class_frequencies:

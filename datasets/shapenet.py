@@ -55,7 +55,7 @@ class ShapenetDataModule(LightningDataModule):
         n_workers = self.cfg["data"]["num_workers"]
 
         loader = DataLoader(
-            self._val, batch_size=batch_size, num_workers=n_workers, shuffle=False
+            self._val, batch_size=batch_size, num_workers=n_workers, shuffle=True
         )
 
         return loader

@@ -5,9 +5,16 @@ import torch.nn as nn
 
 
 class CrossEntropyLoss(nn.Module):
-    def __init__(self, reduction: str = "mean", ignore_index: int = -100, weight: torch.Tensor = None):
+    def __init__(
+        self,
+        reduction: str = "mean",
+        ignore_index: int = -100,
+        weight: torch.Tensor = None,
+    ):
         super().__init__()
-        self.criterion = nn.CrossEntropyLoss(reduction=reduction, ignore_index=ignore_index, weight=weight)
+        self.criterion = nn.CrossEntropyLoss(
+            reduction=reduction, ignore_index=ignore_index, weight=weight
+        )
 
     def forward(self, inputs: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """Compute cross entropy loss.
@@ -21,5 +28,33 @@ class CrossEntropyLoss(nn.Module):
         """
 
         loss = self.criterion(inputs, target)
+
+        return loss
+
+
+class NLLLoss(nn.Module):
+    def __init__(
+        self,
+        reduction: str = "mean",
+        ignore_index: int = -100,
+        weight: torch.Tensor = None,
+    ):
+        super().__init__()
+        self.criterion = nn.NLLLoss(
+            reduction=reduction, ignore_index=ignore_index, weight=weight
+        )
+
+    def forward(self, inputs: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Compute NLL loss.
+
+        Args:
+            inputs (torch.Tensor): unnormalized input tensor of shape [B x C x H x W]
+            target (torch.Tensor): ground-truth target tensor of shape [B x H x W]
+
+        Returns:
+              torch.Tensor: weighted mean of the output losses.
+        """
+
+        loss = self.criterion(torch.log(inputs + 1e-8), target)
 
         return loss

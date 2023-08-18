@@ -51,14 +51,16 @@ LABELS = {
     },
     "shapenet": {
         "background": {"color": (255, 255, 255), "id": 0},
-        "car": {"color": (255, 0, 255), "id": 1},
+        "car": {"color": (102, 102, 102), "id": 1},
         "chair": {"color": (0, 0, 255), "id": 2},
         "table": {"color": (0, 255, 255), "id": 3},
         "sofa": {"color": (255, 0, 0), "id": 4},
         "airplane": {"color": (102, 0, 204), "id": 5},
-        "bottle": {"color": (0, 255, 0), "id": 6},
+        "camera": {"color": (0, 102, 0), "id": 6},
+        "birdhouse": {"color": (255, 153, 204), "id": 7},
     },
 }
+
 
 THEMES = {
     "cityscapes": "cityscapes",
@@ -142,11 +144,11 @@ def compute_prediction_stats(predictions, normalized=False):
     if normalized:
         entropy_predictions = -torch.sum(
             mean_predictions * torch.log(mean_predictions + 10 ** (-8)), dim=1
-        ) / torch.log(class_num)
+        ) / torch.log(torch.tensor(class_num))
 
         mutual_info_predictions = entropy_predictions - torch.mean(
             torch.sum(-predictions * torch.log(predictions + 10 ** (-8)), dim=2)
-            / torch.log(class_num),
+            / torch.log(torch.tensor(class_num)),
             dim=0,
         )
     else:
