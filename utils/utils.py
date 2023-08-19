@@ -181,15 +181,13 @@ def get_predictions(
     softmax = nn.Softmax(dim=1)
     prob_predictions = []
     aleatoric_unc_predictions = []
-    hidden_representations = []
+
+    single_model = model.to(device)
+    single_model.eval()
+    if use_mc_dropout:
+        enable_dropout(single_model)
 
     for i in range(num_predictions):
-        single_model = model.to(device)
-        single_model.eval()
-
-        if use_mc_dropout:
-            enable_dropout(single_model)
-
         with torch.no_grad():
             if aleatoric_model:
                 (

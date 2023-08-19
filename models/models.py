@@ -58,9 +58,11 @@ class NetworkWrapper(LightningModule):
             self.inv_class_frequencies = class_frequencies.sum() / class_frequencies
             self.inv_class_frequencies = self.inv_class_frequencies.to(self.device)
 
-    @property
-    def loss_fn(self):
+        self.loss_fn = self.get_loss_fn()
+
+    def get_loss_fn(self):
         loss_name = self.cfg["model"]["loss"]
+
         if loss_name == Losses.CROSS_ENTROPY:
             return CrossEntropyLoss(
                 ignore_index=self.ignore_index
@@ -312,7 +314,7 @@ class NetworkWrapper(LightningModule):
             if params.grad is not None:
                 total_grad_norm += params.grad.data.norm(2).item()
 
-        self.log(f"LossStats/GradientNorm", total_grad_norm)
+        self.log(f"LossStats/GradientNorm", torch.tensor(total_grad_norm))
 
     def track_predictions(
         self,
@@ -436,6 +438,7 @@ class ERFNet(NetworkWrapper):
         out, _ = self.forward(batch["data"])
         loss = self.get_loss(out, batch["anno"])
 
+        self.track_gradient_norms()
         self.log("train:loss", loss)
 
         return loss
@@ -468,7 +471,7 @@ class AleatoricERFNet(NetworkWrapper):
             deep_encoder=self.deep_encoder,
             epistemic_version=self.epistemic_version,
         )
-        self.softmax = nn.Softmax(dim=-1)
+        self.softmax = nn.Softmax(dim=1)
 
     def replace_output_layer(self):
         if self.model.use_shared_decoder:
@@ -496,34 +499,35 @@ class AleatoricERFNet(NetworkWrapper):
         sampled_predictions = torch.zeros(
             (self.num_mc_aleatoric, *seg.size()), device=self.device
         )
-
+        noise_mean = torch.zeros(seg.size(), device=self.device)
+        noise_std = torch.ones(seg.size(), device=self.device)
+        dist = torch.distributions.normal.Normal(noise_mean, noise_std)
         for i in range(self.num_mc_aleatoric):
-            noise_mean = torch.zeros(seg.size(), device=self.device)
-            noise_std = torch.ones(seg.size(), device=self.device)
-            epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
+            epsilon = dist.sample()
             sampled_seg = seg + torch.mul(std, epsilon)
-            sampled_predictions[i] = self.softmax(sampled_seg)
+            sampled_predictions[i] = sampled_seg
 
-        mean_prediction = torch.mean(sampled_predictions, dim=0)
+        mean_prediction = torch.mean(self.softmax(sampled_predictions), dim=0)
+        # mean_prediction = torch.mean(sampled_predictions, dim=0)
         return self.loss_fn(mean_prediction, true_seg)
 
     def forward(self, x):
         output_seg, output_std, hidden_representation = self.model(x)
         return output_seg, output_std, hidden_representation
 
-    def compute_aleatoric_uncertainty(self, seg, std):
-        predictions = []
-        for i in range(self.num_mc_aleatoric):
-            noise_mean = torch.zeros(seg.size(), device=self.device)
-            noise_std = torch.ones(seg.size(), device=self.device)
-            epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
-            sampled_seg = seg + torch.mul(std, epsilon)
-            predictions.append(self.softmax(sampled_seg).cpu().numpy())
+    # def compute_aleatoric_uncertainty(self, seg, std):
+    #     predictions = []
+    #     for i in range(self.num_mc_aleatoric):
+    #         noise_mean = torch.zeros(seg.size(), device=self.device)
+    #         noise_std = torch.ones(seg.size(), device=self.device)
+    #         epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
+    #         sampled_seg = seg + torch.mul(std, epsilon)
+    #         predictions.append(sampled_seg)
 
-        mean_predictions = np.mean(predictions, axis=0)
-        return -np.sum(
-            mean_predictions * np.log(mean_predictions + sys.float_info.min), axis=1
-        )
+    #     mean_predictions = np.mean(predictions, axis=0)
+    #     return -np.sum(
+    #         mean_predictions * np.log(mean_predictions + sys.float_info.min), axis=1
+    #     )
 
     def track_aleatoric_stats(self, std):
         self.log("Variance/TrainMin", torch.min(std))
@@ -546,7 +550,7 @@ class AleatoricERFNet(NetworkWrapper):
         _, preds = torch.max(est_seg, dim=1)
 
         self.log("Validation/Loss", loss, prog_bar=True)
-        self.track_aleatoric_stats(est_std)
+        # self.track_aleatoric_stats(est_std)
 
         _, preds = torch.max(est_seg, dim=1)
         confusion_matrix = torchmetrics.functional.confusion_matrix(

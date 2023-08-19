@@ -6,7 +6,9 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from datasets import get_data_module
 from models import get_model
+import warnings
 
+warnings.filterwarnings("ignore")
 
 ##############################################################################################
 #                                                                                            #

@@ -59,7 +59,7 @@ test:
 
 ##Network
 model:
-    name: 'erfnet_w_aleatoric'
+    name: 'erfnet_w_aleatoric' # erfnet, erfnet_w_aleatoric
     task: 'classification' # regression, classification
     aleatoric_model: true
     ensemble_model: false
@@ -68,7 +68,7 @@ model:
     deep_encoder: false
     shared_decoder: true
     num_classes: 8
-    loss: 'nll' # xentropy, mse, nll
+    loss: 'nll' # xentropy, nll
     in_channels: 3
     dropout_prob: 0.3
     # class_frequencies:

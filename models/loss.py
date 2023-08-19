@@ -20,7 +20,7 @@ class CrossEntropyLoss(nn.Module):
         """Compute cross entropy loss.
 
         Args:
-            inputs (torch.Tensor): unnormalized input tensor of shape [B x C x H x W]
+            inputs (torch.Tensor): logits of shape [B x C x H x W]
             target (torch.Tensor): ground-truth target tensor of shape [B x H x W]
 
         Returns:
@@ -48,7 +48,7 @@ class NLLLoss(nn.Module):
         """Compute NLL loss.
 
         Args:
-            inputs (torch.Tensor): unnormalized input tensor of shape [B x C x H x W]
+            inputs (torch.Tensor): probability vector of shape [B x C x H x W]
             target (torch.Tensor): ground-truth target tensor of shape [B x H x W]
 
         Returns:
