@@ -240,16 +240,17 @@ def sample_from_aleatoric_classification_model(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     softmax = nn.Softmax(dim=1)
     est_seg, est_std, _ = model.forward(batch["data"])
+
     sampled_predictions = torch.zeros(
         (num_mc_aleatoric, *est_seg.size()), device=device
     )
+    noise_mean = torch.zeros(est_seg.size(), device=device)
+    noise_std = torch.ones(est_seg.size(), device=device)
+    dist = torch.distributions.normal.Normal(noise_mean, noise_std)
     for j in range(num_mc_aleatoric):
-        noise_mean = torch.zeros(est_seg.size(), device=device)
-        noise_std = torch.ones(est_seg.size(), device=device)
-        epsilon = torch.distributions.normal.Normal(noise_mean, noise_std).sample()
+        epsilon = dist.sample()
         sampled_seg = est_seg + torch.mul(est_std, epsilon)
         sampled_predictions[j] = softmax(sampled_seg)
-
     mean_predictions, _, entropy_predictions, _ = compute_prediction_stats(
         sampled_predictions
     )

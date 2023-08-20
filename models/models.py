@@ -505,10 +505,8 @@ class AleatoricERFNet(NetworkWrapper):
         for i in range(self.num_mc_aleatoric):
             epsilon = dist.sample()
             sampled_seg = seg + torch.mul(std, epsilon)
-            sampled_predictions[i] = sampled_seg
-
-        mean_prediction = torch.mean(self.softmax(sampled_predictions), dim=0)
-        # mean_prediction = torch.mean(sampled_predictions, dim=0)
+            sampled_predictions[i] = self.softmax(sampled_seg)
+        mean_prediction = torch.mean(sampled_predictions, dim=0)
         return self.loss_fn(mean_prediction, true_seg)
 
     def forward(self, x):
