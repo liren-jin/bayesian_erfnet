@@ -136,11 +136,10 @@ def enable_dropout(model: nn.Module):
 
 def compute_prediction_stats(predictions, normalized=False):
     mean_predictions = torch.mean(predictions, dim=0)
-    class_num = mean_predictions.shape[-1]
+    class_num = mean_predictions.shape[1]
     variance_predictions = torch.var(predictions, dim=0)
     if variance_predictions.shape[1] == 1:
         variance_predictions = variance_predictions.squeeze(dim=1)
-
     if normalized:
         entropy_predictions = -torch.sum(
             mean_predictions * torch.log(mean_predictions + 10 ** (-8)), dim=1
