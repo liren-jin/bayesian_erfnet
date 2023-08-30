@@ -122,9 +122,12 @@ def weighted_iou_from_conf_matrices(
         weight = torch.cat([weight[:ignore_index], weight[ignore_index + 1 :]])
 
     per_class_iou = per_class_iou * weight
-    return torch.sum(
-        per_class_iou,
-    ).item() / torch.sum(weight)
+    return (
+        torch.sum(
+            per_class_iou,
+        )
+        / torch.sum(weight)
+    ).item()
 
 
 def mean_iou_from_conf_matrices(
